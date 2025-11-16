@@ -1,4 +1,5 @@
 # Neural Network Models for GAIT Analysis and Prediction
+Update: New implementaion using Joint kinematics and kinetics. (Needs Work!!!)
 ## 1. GAIT Analysis and Prediction
 Most of these codes were used for my Master Thesis at NTUA - Mechanical Engineering. Please read the corresponding parts (chapter 3, 4) of my thesis to understand the use of the Phase Variable and all the preprocessing of the Data.
 
