@@ -2,19 +2,14 @@ import os
 import pandas as pd
 import numpy as np
 import joblib
-
 from sklearn.preprocessing import StandardScaler
-
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense, Dropout
-from tensorflow.python.keras.layers.recurrent import LSTM
-from tensorflow.python.keras.metrics import RootMeanSquaredError
-from tensorflow.python.keras.optimizer_v2 import adam
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, LSTM
+from tensorflow.keras.metrics import RootMeanSquaredError
+from tensorflow.keras.optimizers import Adam
 import tensorflow.python.keras as tf_keras
-
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
-
 #This is for saving the model (There were issues with __version__ when calling the function save_model)
 import tensorflow.python.keras as tf_keras
 from keras import __version__
@@ -80,8 +75,6 @@ scaler = StandardScaler()
 data_scaled = scaler.fit_transform(data)   
 joblib.dump(scaler, "Scaler/standard_scaler_typical_lstm.save")
 data_cp_scaled = scaler.transform(data_cerebral_palsy)
-
-#Save scaler for ROS node
 joblib.dump(scaler, "Scaler/standard_scaler_cp_lstm.save")
 
 # ==========================
@@ -127,7 +120,7 @@ model = Sequential([
 ])
 
 # === NEW/CHANGED: accuracy is meaningless for regression
-model.compile(optimizer=adam.Adam(learning_rate=0.001),
+model.compile(optimizer=Adam(learning_rate=0.001),
               loss='mse',
               metrics=['mae', RootMeanSquaredError()])
 

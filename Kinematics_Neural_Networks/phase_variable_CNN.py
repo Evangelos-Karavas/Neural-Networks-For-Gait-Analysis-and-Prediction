@@ -4,11 +4,10 @@ import numpy as np
 from scipy.signal import butter, filtfilt, savgol_filter
 from sklearn.preprocessing import StandardScaler
 import joblib
-
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape, GlobalMaxPooling1D
-from tensorflow.python.keras.optimizer_v2 import adam
-from tensorflow.python.keras.regularizers import l2
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape, GlobalMaxPooling1D
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.regularizers import l2
 
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
@@ -277,7 +276,7 @@ def build_cnn():
     ])
     
     model.compile(
-        optimizer=adam.Adam(learning_rate=0.001),
+        optimizer=Adam(learning_rate=0.001),
         loss='mse',
         metrics=['mae', 'Accuracy']
     )

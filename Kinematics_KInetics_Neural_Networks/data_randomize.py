@@ -49,6 +49,19 @@ for file in os.listdir(DATA_FOLDER):
 
 merged = pd.concat(all_data, ignore_index=True)
 
+# ==========================================
+# FIX RIGHT-LEG PHASE SHIFT (Right is 50% ahead)
+# ==========================================
+RIGHT_COLS = [
+    col for col in ALL_COLS
+    if col.startswith(('RHip', 'RKnee', 'RAnkle'))
+]
+
+SHIFT = STRIDE // 2  # 51 → 25
+
+for col in RIGHT_COLS:
+    merged[col] = np.roll(merged[col].values, SHIFT)
+
 # Smooth angles
 for col in ANGLE_COLS:
     merged[col] = savgol_filter(merged[col], 9, 3)
@@ -56,46 +69,28 @@ for col in ANGLE_COLS:
 # ==========================================
 # Split into strides
 # ==========================================
+
+# after merged is created and BEFORE augmentation:
 num_strides = len(merged) // STRIDE
-merged = merged.iloc[:num_strides*STRIDE]
+merged = merged.iloc[:num_strides * STRIDE].reset_index(drop=True)
 strides = merged.values.reshape(num_strides, STRIDE, -1)
 
-augmented_strides = []
+col_to_idx = {c:i for i,c in enumerate(ALL_COLS)}
+RIGHT_COLS = [c for c in ALL_COLS if c.startswith(("RHip","RKnee","RAnkle"))]
+right_idx = [col_to_idx[c] for c in RIGHT_COLS]
+angle_idx = [col_to_idx[c] for c in ANGLE_COLS]
 
-# ==========================================
-# Augmentation Functions
-# ==========================================
-def augment_stride(stride):
-    """Apply safe biomechanical augmentations."""
-    new = stride.copy()
+SHIFT = STRIDE // 2  # 25
 
-    # 1. amplitude scaling (±5%)
-    scale = 1.0 + np.random.uniform(-0.05, 0.05, size=stride.shape[1:])
-    new *= scale
+# apply shift and smoothing PER STRIDE
+for s in range(num_strides):
+    # roll right side within the stride only
+    strides[s, :, right_idx] = np.roll(strides[s, :, right_idx], SHIFT, axis=0)
 
-    # 2. small Gaussian noise (1% of std)
-    noise_std = np.std(stride, axis=0) * 0.01
-    noise = np.random.normal(0, noise_std, stride.shape)
-    new += noise
+    # smooth angles within the stride only
+    strides[s, :, angle_idx] = savgol_filter(strides[s, :, angle_idx], 9, 3, axis=0)
 
-    # 3. time warp (resample)
-    factor = np.random.uniform(0.95, 1.05)  # ±5%
-    warped = resample(new, int(STRIDE * factor))
-    warped = resample(warped, STRIDE)  # back to 51 samples
-
-    return warped
-
-# ==========================================
-# Apply augmentations
-# ==========================================
-for s in strides:
-    augmented_strides.append(s)  # original stride
-
-    if APPLY_AUGMENTATION:
-        for _ in range(3):  # generate 3 variants per stride
-            augmented_strides.append(augment_stride(s))
-
-augmented_strides = np.array(augmented_strides)
+augmented_strides = np.array(strides)
 
 # Flatten back into dataframe
 final_data = augmented_strides.reshape(-1, augmented_strides.shape[-1])

@@ -2,16 +2,13 @@ import os
 import pandas as pd
 import numpy as np
 import joblib
-
 from sklearn.preprocessing import StandardScaler
-
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape
-from tensorflow.python.keras.optimizer_v2 import adam
-import tensorflow.python.keras as tf_keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape
+from tensorflow.keras.optimizers import Adam
+import tensorflow.keras as tf_keras
 from keras import __version__
 tf_keras.__version__ = __version__
-
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
 
@@ -154,7 +151,7 @@ model = Sequential([
     Reshape((51, 6))
 ])
 
-model.compile(optimizer=adam.Adam(learning_rate=0.001), loss='mse', metrics=['accuracy', 'mae'])
+model.compile(optimizer=Adam(learning_rate=0.001), loss='mse', metrics=['accuracy', 'mae'])
 
 # Check model summary
 model.summary()

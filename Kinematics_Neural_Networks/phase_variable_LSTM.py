@@ -3,12 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from scipy.signal import butter, filtfilt, savgol_filter
-
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense, Dropout
-from tensorflow.python.keras.layers.recurrent import LSTM
-from tensorflow.python.keras.metrics import RootMeanSquaredError
-from tensorflow.python.keras.optimizer_v2 import adam
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.layers.recurrent import LSTM
+from tensorflow.keras.metrics import RootMeanSquaredError
+from tensorflow.keras.optimizers import Adam
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
 import tensorflow as tf
@@ -306,7 +305,7 @@ model = Sequential([
     Dropout(0.2),
     Dense(8, activation='linear')])
 
-model.compile(optimizer=adam.Adam(learning_rate=0.003), loss='mse', metrics=['mae', 'Accuracy'])
+model.compile(optimizer=Adam(learning_rate=0.003), loss='mse', metrics=['mae', 'Accuracy'])
 
 # Train Model
 history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=102, validation_data=(X_val_input, Y_val_output))
