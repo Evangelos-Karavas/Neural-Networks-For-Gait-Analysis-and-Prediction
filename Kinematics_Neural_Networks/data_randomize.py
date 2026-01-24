@@ -79,7 +79,7 @@ columns_to_smooth = ['LHipAngles (1)', 'RHipAngles (1)', 'LKneeAngles (1)', 'RKn
 #     final_df[col] = moving_average(final_df[col].values, window_size=7)
 
 # Wrap-around right leg by 25 steps (cyclic shift)
-delay = 25
+delay = 0
 right_leg_columns = [
     'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)', 'Right Foot Off'
 ]

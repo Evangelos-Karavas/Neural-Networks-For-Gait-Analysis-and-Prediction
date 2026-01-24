@@ -2,9 +2,9 @@ import os
 import numpy as np
 import pandas as pd
 import joblib
-from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Conv1D, LayerNormalization, Input
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.layers import Input, LSTM, Dense, Dropout, LayerNormalization
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 import matplotlib.pyplot as plt
@@ -12,33 +12,20 @@ import matplotlib.pyplot as plt
 # ===================================================
 # SETTINGS
 # ===================================================
-HEALTHY_FILE = "Data_Normal/dynamics_total_augmented.xlsx"  # augmented healthy file (single sheet)
-CP_FOLDER = "Data_CP/"                                     # CP stride files (sheet "Data")
-OUT_DIR_ASSIST = "Predictions/Assistance_Sagittal/"
-OUT_DIR_ANGLEPRED = "Predictions/Angle_Predictions/"
+HEALTHY_FILE = "Data_Normal/dynamics_total_augmented.xlsx"   # TD merged/augmented
+CP_FOLDER    = "Data_CP/"                                   # CP stride files (each one stride)
+STRIDE       = 51
 
-MODEL_TYPE = "cnn"   # "cnn" or "lstm"
-STRIDE = 51
+MODEL_SAVE       = "Saved_Models/td_nextstride_36to18.keras"
+SCALER_X_SAVE    = "Scaler/td_x36_scaler.save"
+SCALER_Y_SAVE    = "Scaler/td_y18_scaler.save"
 
-# --- saved artifacts ---
-MODEL_INV_SAVE = "Saved_Models/invdyn_angles_to_sagmom.keras"
-SCALER_INV_X_SAVE = "Scaler/invdyn_x_scaler.save"
-SCALER_INV_Y_SAVE = "Scaler/invdyn_y_scaler.save"
-
-MODEL_ANG_SAVE = "Saved_Models/kinetics_to_angles.keras"
-SCALER_ANG_X_SAVE = "Scaler/kin2ang_x_scaler.save"
-SCALER_ANG_Y_SAVE = "Scaler/kin2ang_y_scaler.save"
-
-# Create folders
-for p in [
-    os.path.dirname(MODEL_INV_SAVE),
-    os.path.dirname(MODEL_ANG_SAVE),
-    os.path.dirname(SCALER_INV_X_SAVE),
-    os.path.dirname(SCALER_ANG_X_SAVE),
-    OUT_DIR_ASSIST,
-    OUT_DIR_ANGLEPRED,
-]:
-    os.makedirs(p, exist_ok=True)
+PLOT_DIR = "Predictions/Plots"
+OUT_DIR  = "Predictions"
+os.makedirs(os.path.dirname(MODEL_SAVE), exist_ok=True)
+os.makedirs(os.path.dirname(SCALER_X_SAVE), exist_ok=True)
+os.makedirs(PLOT_DIR, exist_ok=True)
+os.makedirs(OUT_DIR, exist_ok=True)
 
 # ===================================================
 # COLUMNS
@@ -48,303 +35,272 @@ MOMENT_COLS = [
     'LKneeMoment (1)','RKneeMoment (1)','LKneeMoment (2)','RKneeMoment (2)','LKneeMoment (3)','RKneeMoment (3)',
     'LAnkleMoment (1)','RAnkleMoment (1)','LAnkleMoment (2)','RAnkleMoment (2)','LAnkleMoment (3)','RAnkleMoment (3)'
 ]
-
 FORCE_COLS = [
     'LHipForce (1)','RHipForce (1)','LHipForce (2)','RHipForce (2)','LHipForce (3)','RHipForce (3)',
     'LKneeForce (1)','RKneeForce (1)','LKneeForce (2)','RKneeForce (2)','LKneeForce (3)','RKneeForce (3)',
     'LAnkleForce (1)','RAnkleForce (1)','LAnkleForce (2)','RAnkleForce (2)','LAnkleForce (3)','RAnkleForce (3)'
 ]
-
 ANGLE_COLS = [
     'LHipAngles (1)','RHipAngles (1)','LHipAngles (2)','RHipAngles (2)','LHipAngles (3)','RHipAngles (3)',
     'LKneeAngles (1)','RKneeAngles (1)','LKneeAngles (2)','RKneeAngles (2)','LKneeAngles (3)','RKneeAngles (3)',
     'LAnkleAngles (1)','RAnkleAngles (1)','LAnkleAngles (2)','RAnkleAngles (2)','LAnkleAngles (3)','RAnkleAngles (3)'
 ]
 
-# Sagittal moments only (1) = sagittal
-MOMENT_SAG_COLS = [
-    "LHipMoment (1)", "RHipMoment (1)",
-    "LKneeMoment (1)", "RKneeMoment (1)",
-    "LAnkleMoment (1)", "RAnkleMoment (1)"
+INPUT_COLS  = FORCE_COLS + ANGLE_COLS   # 36
+OUTPUT_COLS = ANGLE_COLS                               # 18
+
+# Sagittal plot indices inside the 18-angle output
+SAG_NAMES = [
+    "LHipAngles (1)", "RHipAngles (1)",
+    "LKneeAngles (1)", "RKneeAngles (1)",
+    "LAnkleAngles (1)", "RAnkleAngles (1)"
 ]
+SAG_IDX = [ANGLE_COLS.index(n) for n in SAG_NAMES]  # robust
 
 # ===================================================
 # HELPERS
 # ===================================================
-def reshape_strides(A_flat, stride_len=51):
-    n = len(A_flat) // stride_len
-    A_flat = A_flat[:n * stride_len]
-    return A_flat.reshape(n, stride_len, -1)
-
-def add_derivatives(angles_3d):
-    vel = np.gradient(angles_3d, axis=1)
-    acc = np.gradient(vel, axis=1)
-    return np.concatenate([angles_3d, vel, acc], axis=-1)  # (N,51,54)
-
-def scale3d(sc, A):
-    shp = A.shape
-    return sc.transform(A.reshape(-1, shp[-1])).reshape(shp)
-
-def build_model(model_type, T, xin, yout):
-    if model_type.lower() == "cnn":
-        model = Sequential([
-            Input(shape=(T, xin)),
-            Conv1D(128, 5, padding="same", activation="relu"),
-            Dropout(0.2),
-            Conv1D(128, 5, padding="same", activation="relu"),
-            Dropout(0.2),
-            Conv1D(64, 3, padding="same", activation="relu"),
-            Dense(yout)
-        ])
-    elif model_type.lower() == "lstm":
-        model = Sequential([
-            Input(shape=(T, xin)),
-            LSTM(96, return_sequences=True),
-            LayerNormalization(),
-            Dropout(0.2),
-            LSTM(96, return_sequences=True),
-            LayerNormalization(),
-            Dropout(0.2),
-            Dense(64, activation="tanh"),
-            Dense(yout)
-        ])
-    else:
-        raise ValueError("MODEL_TYPE must be 'cnn' or 'lstm'")
-
-    model.compile(
-        optimizer=Adam(1e-3),
-        loss="mse",
-        metrics=["mae", tf.keras.metrics.RootMeanSquaredError()]
-    )
-    return model
-
-def load_cp_stride_file(path, usecols):
-    # CP format: row0 headers, row1 Left/Right, row2 units, then 51 numeric rows
-    df = pd.read_excel(
-        path,
-        sheet_name="Data",
-        header=0,
-        skiprows=[1, 2],
-        usecols=usecols
-    )
+def load_td_excel(path):
+    df = pd.read_excel(path, sheet_name=0, usecols=INPUT_COLS)
     df.columns = df.columns.str.strip()
-    df = df.dropna(how="all").reset_index(drop=True)
-
-    if len(df) >= STRIDE:
-        df = df.iloc[:STRIDE].copy()
-
-    if len(df) != STRIDE:
-        raise ValueError(f"{os.path.basename(path)} has {len(df)} rows, expected {STRIDE}")
+    df = df.dropna().reset_index(drop=True)
     return df
 
-# ===================================================
-# LOAD HEALTHY (augmented excel) - first sheet
-# ===================================================
-# Your augmented file was saved with to_excel(index=False), so it’s typically sheet 0.
-df_h = pd.read_excel(HEALTHY_FILE, sheet_name=0, usecols=ANGLE_COLS + MOMENT_SAG_COLS + MOMENT_COLS + FORCE_COLS)
-df_h.columns = df_h.columns.str.strip()
-df_h = df_h.dropna().reset_index(drop=True)
+def load_cp_folder(folder):
+    """Each CP file is one stride (51 rows). Returns (N,51,36) and names."""
+    strides = []
+    names = []
+    for file in sorted(os.listdir(folder)):
+        if not file.endswith(".xlsx"):
+            continue
+        fp = os.path.join(folder, file)
+        try:
+            df = pd.read_excel(fp, sheet_name="Data", header=0, skiprows=[1,2], usecols=INPUT_COLS)
+            df.columns = df.columns.str.strip()
+            df = df.dropna(how="all").reset_index(drop=True)
+            if len(df) < STRIDE:
+                continue
+            df = df.iloc[:STRIDE].copy()
+            if len(df) != STRIDE:
+                continue
+            strides.append(df.to_numpy(np.float32))
+            names.append(file)
+        except Exception as e:
+            print(f"[WARN] Skipping {file}: {e}")
+
+    if len(strides) == 0:
+        return np.empty((0, STRIDE, len(INPUT_COLS)), dtype=np.float32), []
+    return np.stack(strides, axis=0), names
+
+def to_next_stride_pairs(strides_3d):
+    """
+    TD only: strides are time-contiguous in the merged file.
+    strides_3d: (N,51,36)
+    returns X:(N-1,51,36), Y:(N-1,51,18)
+    """
+    if len(strides_3d) < 2:
+        return np.empty((0, STRIDE, 36), dtype=np.float32), np.empty((0, STRIDE, 18), dtype=np.float32)
+    X = strides_3d[:-1]
+    Y = strides_3d[1:, :, -18:]
+    return X, Y
+
+def scale_3d(scaler, A):
+    shp = A.shape
+    return scaler.transform(A.reshape(-1, shp[-1])).reshape(shp)
+
+def inv_scale_3d(scaler, A):
+    shp = A.shape
+    return scaler.inverse_transform(A.reshape(-1, shp[-1])).reshape(shp)
+
+def phase_align_by_knee(cp6, ref6):
+    """
+    Align CP stride to reference stride by matching knee angles (sagittal).
+    cp6/ref6: (51,6) in DEGREES.
+    Returns a circularly-shifted cp6 so that LKnee matches best.
+    """
+    lknee_cp = cp6[:, 2]
+    lknee_ref = ref6[:, 2]
+    best_shift = 0
+    best_err = 1e18
+    for s in range(STRIDE):
+        rolled = np.roll(lknee_cp, -s)
+        err = np.mean((rolled - lknee_ref) ** 2)
+        if err < best_err:
+            best_err = err
+            best_shift = s
+    return np.roll(cp6, -best_shift, axis=0), best_shift
 
 # ===================================================
-# LOAD CP (all files)
+# LOAD TD (TRAIN DATA)
 # ===================================================
-cp_names = []
-cp_angles_list = []
-cp_moms_sag_list = []
-cp_moms_all_list = []
-cp_forces_list = []
+df_td = load_td_excel(HEALTHY_FILE)
+data_td = df_td.to_numpy(np.float32)
 
-for file in sorted(os.listdir(CP_FOLDER)):
-    if not file.endswith(".xlsx"):
-        continue
-    path = os.path.join(CP_FOLDER, file)
-    try:
-        df_cp = load_cp_stride_file(path, usecols=ANGLE_COLS + MOMENT_SAG_COLS + MOMENT_COLS + FORCE_COLS)
+n_td = len(data_td) // STRIDE
+data_td = data_td[:n_td * STRIDE]
+td_strides = data_td.reshape(n_td, STRIDE, -1)  # (Ntd,51,36)
+print("TD strides:", td_strides.shape)
 
-        cp_names.append(file)
-        cp_angles_list.append(df_cp[ANGLE_COLS].to_numpy(np.float32))           # (51,18)
-        cp_moms_sag_list.append(df_cp[MOMENT_SAG_COLS].to_numpy(np.float32))   # (51,6)
-        cp_moms_all_list.append(df_cp[MOMENT_COLS].to_numpy(np.float32))       # (51,18)
-        cp_forces_list.append(df_cp[FORCE_COLS].to_numpy(np.float32))          # (51,18)
-
-    except Exception as e:
-        print(f"[WARN] Skipping {file}: {e}")
-
-Xcp_ang = np.stack(cp_angles_list, axis=0)     # (Ncp,51,18)
-Ycp_mom_sag = np.stack(cp_moms_sag_list, axis=0)  # (Ncp,51,6)
-Xcp_mom_all = np.stack(cp_moms_all_list, axis=0)  # (Ncp,51,18)
-Xcp_force = np.stack(cp_forces_list, axis=0)      # (Ncp,51,18)
-
-print("CP loaded:", Xcp_ang.shape, Ycp_mom_sag.shape)
+X_td, Y_td = to_next_stride_pairs(td_strides)
+print("TD pairs:", X_td.shape, Y_td.shape)
 
 # ===================================================
-# (A) INVERSE DYNAMICS SURROGATE
-# Healthy: angles(+derivatives) -> sagittal moments (6)
+# TRAIN/VAL SPLIT (TD ONLY)
 # ===================================================
-Xh_ang_flat = df_h[ANGLE_COLS].to_numpy(np.float32)
-Yh_sag_flat = df_h[MOMENT_SAG_COLS].to_numpy(np.float32)
-
-Xh_ang = reshape_strides(Xh_ang_flat, STRIDE)   # (Nh,51,18)
-Yh_sag = reshape_strides(Yh_sag_flat, STRIDE)   # (Nh,51,6)
-
-Xh_in = add_derivatives(Xh_ang)                 # (Nh,51,54)
-
-# Shuffle split by stride
-idx = np.arange(len(Xh_in))
+idx = np.arange(len(X_td))
 np.random.shuffle(idx)
 split = int(0.8 * len(idx))
 tr_idx, va_idx = idx[:split], idx[split:]
 
-X_tr, X_va = Xh_in[tr_idx], Xh_in[va_idx]
-Y_tr, Y_va = Yh_sag[tr_idx], Yh_sag[va_idx]
+X_tr, X_va = X_td[tr_idx], X_td[va_idx]
+Y_tr, Y_va = Y_td[tr_idx], Y_td[va_idx]
 
-sc_inv_x = StandardScaler().fit(X_tr.reshape(-1, X_tr.shape[-1]))
-sc_inv_y = StandardScaler().fit(Y_tr.reshape(-1, Y_tr.shape[-1]))
+# ===================================================
+# SCALERS (FIT ON TD TRAIN ONLY)
+# ===================================================
+sc_x = StandardScaler().fit(X_tr.reshape(-1, X_tr.shape[-1]))   # 36
+sc_y = StandardScaler().fit(Y_tr.reshape(-1, Y_tr.shape[-1]))   # 18
+joblib.dump(sc_x, SCALER_X_SAVE)
+joblib.dump(sc_y, SCALER_Y_SAVE)
+print("Saved scalers:", SCALER_X_SAVE, SCALER_Y_SAVE)
 
-joblib.dump(sc_inv_x, SCALER_INV_X_SAVE)
-joblib.dump(sc_inv_y, SCALER_INV_Y_SAVE)
+X_tr_s = scale_3d(sc_x, X_tr)
+X_va_s = scale_3d(sc_x, X_va)
+Y_tr_s = scale_3d(sc_y, Y_tr)
+Y_va_s = scale_3d(sc_y, Y_va)
 
-X_tr_s = scale3d(sc_inv_x, X_tr)
-X_va_s = scale3d(sc_inv_x, X_va)
-Y_tr_s = scale3d(sc_inv_y, Y_tr)
-Y_va_s = scale3d(sc_inv_y, Y_va)
+# ===================================================
+# WEIGHTED LOSS: weight axis (1) > axis (2) > axis (3)
+# Indices for axis (1)/(2)/(3) within ANGLE_COLS:
+#   for each joint-side we have (1),(2),(3)
+# Here: (1) are SAG_IDX + also hip/knee/ankle only exist, so that's correct.
+# But we generalize: find indices containing "(1)", "(2)", "(3)".
+# ===================================================
+w = np.ones((18,), dtype=np.float32)
+idx1 = [i for i, c in enumerate(ANGLE_COLS) if "(1)" in c]
+idx2 = [i for i, c in enumerate(ANGLE_COLS) if "(2)" in c]
+idx3 = [i for i, c in enumerate(ANGLE_COLS) if "(3)" in c]
+w[idx1] = 3.0
+w[idx2] = 1.5
+w[idx3] = 1.0
+w_tf = tf.constant(w, dtype=tf.float32)
 
-model_inv = build_model(MODEL_TYPE, STRIDE, X_tr_s.shape[-1], Y_tr_s.shape[-1])
-print(model_inv.summary())
+@tf.keras.utils.register_keras_serializable()
+def weighted_mse(y_true, y_pred):
+    err2 = tf.square(y_true - y_pred)         # (B,51,18)
+    return tf.reduce_mean(err2 * w_tf)
 
-history_inv = model_inv.fit(
-    X_tr_s, Y_tr_s,
-    validation_data=(X_va_s, Y_va_s),
-    epochs=200,          # you can raise; early stopping optional
-    batch_size=16,
-    verbose=1
+# ===================================================
+# MODEL
+# ===================================================
+model = Sequential([
+    Input(shape=(STRIDE, 36)),
+    LSTM(256, return_sequences=True),
+    LayerNormalization(),
+    Dropout(0.2),
+
+    LSTM(256, return_sequences=True),
+    LayerNormalization(),
+    Dropout(0.2),
+
+    Dense(128, activation="tanh"),
+    Dropout(0.2),
+    Dense(18)
+])
+
+model.compile(
+    optimizer=Adam(1e-3),
+    loss=weighted_mse,
+    metrics=["mae", tf.keras.metrics.RootMeanSquaredError()]
 )
-
-model_inv.save(MODEL_INV_SAVE, include_optimizer=True)
-print("Saved inverse model:", MODEL_INV_SAVE)
-
-# ---- Assistance computation ----
-target_angles = Xh_ang.mean(axis=0)  # (51,18) typical template
-target_angles_all = np.repeat(target_angles[None, :, :], repeats=len(Xcp_ang), axis=0)
-
-Xtarget_in = add_derivatives(target_angles_all)
-Xtarget_in_s = scale3d(sc_inv_x, Xtarget_in)
-
-Mreq_s = model_inv.predict(Xtarget_in_s, verbose=0)  # scaled required sag moments
-Mreq = sc_inv_y.inverse_transform(Mreq_s.reshape(-1, 6)).reshape(Mreq_s.shape)
-Mexo = Mreq - Ycp_mom_sag
-
-# Save assistance files
-for i, name in enumerate(cp_names):
-    base = os.path.splitext(name)[0]
-    out_path = os.path.join(OUT_DIR_ASSIST, f"{base}_assist_sag.xlsx")
-
-    df_out = pd.DataFrame({
-        "t": np.arange(STRIDE),
-        "CP_LHipM1": Ycp_mom_sag[i,:,0], "CP_RHipM1": Ycp_mom_sag[i,:,1],
-        "CP_LKneeM1": Ycp_mom_sag[i,:,2], "CP_RKneeM1": Ycp_mom_sag[i,:,3],
-        "CP_LAnkM1": Ycp_mom_sag[i,:,4], "CP_RAnkM1": Ycp_mom_sag[i,:,5],
-
-        "REQ_LHipM1": Mreq[i,:,0], "REQ_RHipM1": Mreq[i,:,1],
-        "REQ_LKneeM1": Mreq[i,:,2], "REQ_RKneeM1": Mreq[i,:,3],
-        "REQ_LAnkM1": Mreq[i,:,4], "REQ_RAnkM1": Mreq[i,:,5],
-
-        "EXO_LHipM1": Mexo[i,:,0], "EXO_RHipM1": Mexo[i,:,1],
-        "EXO_LKneeM1": Mexo[i,:,2], "EXO_RKneeM1": Mexo[i,:,3],
-        "EXO_LAnkM1": Mexo[i,:,4], "EXO_RAnkM1": Mexo[i,:,5],
-    })
-    df_out.to_excel(out_path, index=False)
-
-print("Saved assistance files to:", OUT_DIR_ASSIST)
-
-# Plot one assistance example
-if len(cp_names) > 0:
-    j = 0
-    t = np.arange(STRIDE)
-    labels = ["LHipM1","RHipM1","LKneeM1","RKneeM1","LAnkM1","RAnkM1"]
-
-    plt.figure(figsize=(14, 18))
-    for k in range(6):
-        plt.subplot(3, 2, k+1)
-        plt.plot(t, Ycp_mom_sag[j,:,k], label="CP measured")
-        plt.plot(t, Mreq[j,:,k], label="Required (typical target)")
-        plt.plot(t, Mexo[j,:,k], "--", label="Assistance (exo)")
-        plt.title(labels[k])
-        plt.grid(True)
-        plt.legend()
-    plt.tight_layout()
-    plt.show()
+print(model.summary())
 
 # ===================================================
-# (B) ANGLE PREDICTION MODEL
-# Healthy: (moments + forces) -> angles
+# TRAIN
 # ===================================================
-INPUT_COLS_ANG = MOMENT_COLS + FORCE_COLS   # 36 inputs
-OUTPUT_COLS_ANG = ANGLE_COLS                # 18 outputs
-
-Xh_k_flat = df_h[INPUT_COLS_ANG].to_numpy(np.float32)
-Yh_a_flat = df_h[OUTPUT_COLS_ANG].to_numpy(np.float32)
-
-Xh_k = reshape_strides(Xh_k_flat, STRIDE)   # (Nh,51,36)
-Yh_a = reshape_strides(Yh_a_flat, STRIDE)   # (Nh,51,18)
-
-# Build CP kinetics input (moments+forces)
-Xcp_k = np.concatenate([Xcp_mom_all, Xcp_force], axis=-1)  # (Ncp,51,36)
-Ycp_a = Xcp_ang                                           # measured angles (Ncp,51,18)
-
-# Split healthy
-idx = np.arange(len(Xh_k))
-np.random.shuffle(idx)
-split = int(0.8 * len(idx))
-tr, va = idx[:split], idx[split:]
-
-X_tr, X_va = Xh_k[tr], Xh_k[va]
-Y_tr, Y_va = Yh_a[tr], Yh_a[va]
-
-sc_ang_x = StandardScaler().fit(X_tr.reshape(-1, X_tr.shape[-1]))
-sc_ang_y = StandardScaler().fit(Y_tr.reshape(-1, Y_tr.shape[-1]))
-
-joblib.dump(sc_ang_x, SCALER_ANG_X_SAVE)
-joblib.dump(sc_ang_y, SCALER_ANG_Y_SAVE)
-
-X_tr_s = scale3d(sc_ang_x, X_tr)
-X_va_s = scale3d(sc_ang_x, X_va)
-Y_tr_s = scale3d(sc_ang_y, Y_tr)
-Y_va_s = scale3d(sc_ang_y, Y_va)
-
-model_ang = build_model(MODEL_TYPE, STRIDE, X_tr_s.shape[-1], Y_tr_s.shape[-1])
-print(model_ang.summary())
-
-history_ang = model_ang.fit(
+cb = [
+    tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=8, min_lr=1e-5)
+]
+history = model.fit(
     X_tr_s, Y_tr_s,
     validation_data=(X_va_s, Y_va_s),
     epochs=200,
-    batch_size=16,
-    verbose=1 
+    batch_size=32,
+    callbacks=cb,
+    verbose=1
 )
 
-model_ang.save(MODEL_ANG_SAVE, include_optimizer=True)
-print("Saved angle model:", MODEL_ANG_SAVE)
+model.save(MODEL_SAVE, include_optimizer=True)
+print("Saved model:", MODEL_SAVE)
 
-# ---- Predict angles for one CP stride and visualize ----
-if len(cp_names) > 0:
-    j = 0
-    cp_pred_s = model_ang.predict(scale3d(sc_ang_x, Xcp_k[j:j+1]), verbose=0)[0]  # (51,18) scaled
-    cp_pred = sc_ang_y.inverse_transform(cp_pred_s)                               # (51,18) unscaled
+# ===================================================
+# TD VALIDATION PLOT (pred next stride vs real next stride)
+# ===================================================
+pred_va_s = model.predict(X_va_s, verbose=0)
+pred_va = inv_scale_3d(sc_y, pred_va_s)
+true_va = inv_scale_3d(sc_y, Y_va_s)
 
-    # Save predicted stride
-    out_path = os.path.join(OUT_DIR_ANGLEPRED, f"{os.path.splitext(cp_names[j])[0]}_pred_angles.xlsx")
-    pd.DataFrame(cp_pred, columns=OUTPUT_COLS_ANG).to_excel(out_path, index=False)
-    print("Saved predicted angles example to:", out_path)
+ex = 0
+t = np.arange(STRIDE)
+plt.figure(figsize=(12, 10))
+for i, (idx_ang, name) in enumerate(zip(SAG_IDX, SAG_NAMES)):
+    plt.subplot(3, 2, i+1)
+    plt.plot(t, true_va[ex][:, idx_ang], label="TD real (k+1)")
+    plt.plot(t, pred_va[ex][:, idx_ang], "--", label="TD predicted")
+    plt.title(f"TD VAL: {name}")
+    plt.grid(True)
+    plt.legend()
+plt.tight_layout()
+plt.savefig(os.path.join(PLOT_DIR, "td_val_sagittal_pred_vs_real.png"), dpi=150)
+plt.show()
 
-    t = np.arange(STRIDE)
-    plt.figure(figsize=(15, 26))
-    for i, col in enumerate(OUTPUT_COLS_ANG):
-        plt.subplot(9, 2, i+1)
-        plt.plot(t, Ycp_a[j, :, i], label="CP measured angles")
-        plt.plot(t, cp_pred[:, i], "--", label="Predicted angles (from kinetics)")
-        plt.title(col)
-        plt.grid(True)
-        plt.legend()
-    plt.tight_layout()
-    plt.show()
+# ===================================================
+# CP: "CORRECTION" EVALUATION (NO pairing)
+# We do NOT compare to CP next stride.
+# We compare CP stride to a healthy reference stride produced by the TD model.
+# ===================================================
+cp_strides, cp_names = load_cp_folder(CP_FOLDER)
+print("CP strides loaded:", cp_strides.shape)
+
+if len(cp_strides) == 0:
+    print("[WARN] No CP strides found.")
+    raise SystemExit(0)
+
+# --- Build a healthy reference stride using TD model in "generator mode" ---
+# Seed = a random TD stride from your dataset
+seed_td = td_strides[np.random.randint(0, len(td_strides))]          # (51,36)
+seed_td_s = scale_3d(sc_x, seed_td[None, ...])                       # (1,51,36)
+
+ref_angles_s = model.predict(seed_td_s, verbose=0)[0]                # (51,18) scaled
+ref_angles = sc_y.inverse_transform(ref_angles_s)                    # (51,18) degrees
+ref_sag6 = ref_angles[:, SAG_IDX]                                    # (51,6)
+
+# Save the full healthy reference angles (18) so you can load it in ROS2 as reference
+pd.DataFrame(ref_angles, columns=OUTPUT_COLS).to_excel(
+    os.path.join(OUT_DIR, "healthy_reference_stride_from_td_model.xlsx"), index=False
+)
+print("Saved healthy reference stride (18): Predictions/healthy_reference_stride_from_td_model.xlsx")
+
+# --- Take one CP file and align/plot vs reference ---
+cp0 = cp_strides[0]                 # (51,36)
+cp0_angles = cp0[:, -18:]           # (51,18) degrees
+cp0_sag6 = cp0_angles[:, SAG_IDX]   # (51,6)
+
+cp0_sag6_aligned, shift = phase_align_by_knee(cp0_sag6, ref_sag6)
+print(f"Phase aligned CP[0] by shift={shift} samples (circular).")
+
+plt.figure(figsize=(12, 10))
+for i, name in enumerate(SAG_NAMES):
+    plt.subplot(3, 2, i+1)
+    plt.plot(t, cp0_sag6_aligned[:, i], label="CP stride (aligned)")
+    plt.plot(t, ref_sag6[:, i], "--", label="Healthy ref (TD model)")
+    plt.title(f"CP vs HealthyRef: {name}")
+    plt.grid(True)
+    plt.legend()
+plt.tight_layout()
+plt.savefig(os.path.join(PLOT_DIR, "cp_vs_healthyref_sagittal.png"), dpi=150)
+plt.show()
+
+# Optional: save an 18-angle "corrected reference" for this CP file (just the ref)
+np.save(os.path.join(OUT_DIR, "corrected_cp_reference_gait.npy"), ref_sag6.astype(np.float32))
+print("Saved corrected_cp_reference_gait.npy (51x6 sagittal reference).")
