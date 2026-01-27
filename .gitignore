@@ -1,5 +1,4 @@
 # Ignored Folders
-/Predictions/
-/Saved_Models/
-/Scaler/
+/Data_CP/
+/Data_Normal/
 /.vscode/
