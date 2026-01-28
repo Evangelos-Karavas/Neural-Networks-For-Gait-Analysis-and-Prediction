@@ -202,7 +202,7 @@ def plot_pv_sanity(df, stride_len=51, n_strides=3, title_prefix=""):
     plt.tight_layout()
     plt.show()
 
-def plot_pv_left_right_overlay(df, title="PV Left & Right (overlay)", max_samples=None):
+def plot_pv_left_right_overlay(df, title="Phase Variable Left & Right", max_samples=None):
 
     pvL = df["PhaseVariable_Left"].to_numpy()
     pvR = df["PhaseVariable_Right"].to_numpy()
@@ -425,7 +425,7 @@ def main():
     typ_df = apply_right_leg_half_stride_offset(typ_df, STRIDE_LEN, RIGHT_ANGLE_COLS, pv_right_col="PhaseVariable_Right")
 
     plot_pv_sanity(typ_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="Typical")
-    plot_pv_left_right_overlay(typ_df, title="Typical: PV Left & Right (full, overlay)", max_samples=51*10)
+    plot_pv_left_right_overlay(typ_df, title="PV Left & Right", max_samples=51*10)
     plot_pv_left_right_per_stride(typ_df, stride_len=STRIDE_LEN, n_strides=6, title="Typical: PV Left & Right (first strides)")
 
     # -------------------------
