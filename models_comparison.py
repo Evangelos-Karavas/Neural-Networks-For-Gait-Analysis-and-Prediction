@@ -1,28 +1,14 @@
 #!/usr/bin/env python3
 """
-models_comparison.py  (Timestamp vs Phase-Variable, 1-to-1)
+models_comparison_4models.py
+(Timestamp-LSTM vs PV-LSTM vs Timestamp-CNN vs PV-CNN) using a CP stream.
 
-What it does:
-- Loads BOTH trained models + their scalers:
-    * Timestamp rolling next-tick model (angles-only)
-    * PV rolling next-tick model (pv+angles)
-- Builds a CP dataset the SAME way as your PV script:
-    * reads CP per file
-    * computes PV per stride from hip angle + foot-off %
-    * applies right-leg half-stride shift stridewise (angles + PV_Right)
-- Builds rolling windows for BOTH networks from the SAME cp_df stream:
-    * Timestamp: (51,6)->(6)
-    * PV:        (51,8)->(6)
-- Produces:
-    1) Single-stride, one-step-ahead figure (like your screenshot) for Timestamp
-    2) Single-stride, one-step-ahead figure (like your screenshot) for PV
-    3) Segment plots: GT vs Timestamp vs PV (6 joints)
-    4) Segment plots: |error| Timestamp vs PV (6 joints)
-    5) Segment plots: residual histograms for both
-    6) Segment plots: mean |error| vs phase (binned by PV_Left)
-- Saves Excel outputs in Predictions/
+All comparisons are:
+  input window (51 x D) -> predict next angles (6)
 
-Edit paths at the top if your filenames differ.
+Notes:
+- Timestamp-CNN in your timestamps_CNN.py is trained stride->next-stride (51x6 -> 51x6).
+  For next-tick evaluation, we interpret "next tick" as the FIRST sample of the predicted next stride.
 """
 
 import os
@@ -34,7 +20,7 @@ from tensorflow.keras.models import load_model
 
 
 # ============================================================
-# SETTINGS (edit paths if needed)
+# SETTINGS
 # ============================================================
 STRIDE_LEN = 51
 WINDOW = 51
@@ -44,19 +30,29 @@ CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
 
-# --- Timestamp artifacts ---
-TIMESTAMP_MODEL_PATH = "Saved_Models/Timestamp_lstm_model.keras"
-TIMESTAMP_SCALER_PATH = "Scaler/standard_scaler_typical_lstm.save"  # angles scaler (fit on typical)
-
-# --- PV artifacts ---
-PV_MODEL_PATH = "Saved_Models/PV_rolling_next_tick_lstm_final.keras"
-PV_SCALER_PV_PATH = "Scaler/scaler_pv.save"
-PV_SCALER_ANGLES_PATH = "Scaler/scaler_angles.save"
-
 PRED_DIR = "Predictions"
 os.makedirs(PRED_DIR, exist_ok=True)
 
-# --- columns ---
+# -----------------------------
+# LSTM artifacts
+# -----------------------------
+TIMESTAMP_LSTM_MODEL_PATH = "Saved_Models/Timestamp_lstm_model.keras"
+TIMESTAMP_LSTM_SCALER_PATH = "Scaler/standard_scaler_typical_lstm.save"
+
+PV_LSTM_MODEL_PATH = "Saved_Models\PV_rolling_next_tick_lstm.keras"
+PV_LSTM_SCALER_PV_PATH = "Scaler/scaler_pv.save"
+PV_LSTM_SCALER_ANGLES_PATH = "Scaler/scaler_angles.save"
+
+TIMESTAMP_CNN_MODEL_PATH = "Saved_Models/Timestamp_cnn_model.keras"
+TIMESTAMP_CNN_SCALER_PATH = "Scaler/standard_scaler_typical_cnn.save"
+
+PV_CNN_MODEL_PATH = "Saved_Models/PV_rolling_next_tick_cnn_final.keras"
+PV_CNN_SCALER_PV_PATH = "Scaler/scaler_pv_cnn.save"
+PV_CNN_SCALER_ANGLES_PATH = "Scaler/scaler_angles_cnn.save"
+
+# -----------------------------
+# columns
+# -----------------------------
 ANGLE_COLS = [
     "LHipAngles (1)", "LKneeAngles (1)", "LAnkleAngles (1)",
     "RHipAngles (1)", "RKneeAngles (1)", "RAnkleAngles (1)"
@@ -88,9 +84,6 @@ def half_stride_shift(stride_len: int) -> int:
     return int(stride_len // 2)  # 51 -> 25
 
 def roll_stridewise_1d(x: np.ndarray, stride_len: int, shift: int) -> np.ndarray:
-    """
-    Circularly roll a 1D array within each stride block (no mixing across strides).
-    """
     x = np.asarray(x)
     n_strides = len(x) // stride_len
     x = x[:n_strides * stride_len].copy()
@@ -111,14 +104,9 @@ def apply_right_leg_half_stride_offset(df: pd.DataFrame, stride_len: int, right_
 
 
 # ============================================================
-# Phase variable computation (same as your PV script)
+# Phase variable computation
 # ============================================================
 def compute_pv_stride(q: np.ndarray, c: float, enforce_monotonic: bool = True) -> np.ndarray:
-    """
-    q: hip angle over one stride, shape (N,)
-    c: stance fraction in [0,1], from Foot-Off% / 100
-    Returns PV s in [0,1).
-    """
     q = q.astype(np.float64)
     N = q.shape[0]
 
@@ -134,10 +122,9 @@ def compute_pv_stride(q: np.ndarray, c: float, enforce_monotonic: bool = True) -
 
     s = np.zeros(N, dtype=np.float64)
 
-    # stance portion
+    # stance
     s[:idx_min + 1] = ((q0 - q[:idx_min + 1]) / denom) * c
-
-    # swing portion
+    # swing
     s[idx_min:] = 1.0 + ((1.0 - c) / denom) * (q[idx_min:] - q0)
 
     s = np.clip(s, 0.0, 1.0)
@@ -158,13 +145,10 @@ def compute_phase_variables(df: pd.DataFrame, stride_len: int,
 
     for s in range(n_strides):
         a, b = s * stride_len, (s + 1) * stride_len
-
         cL = float(out[lfo_col].iloc[a]) / 100.0
         cR = float(out[rfo_col].iloc[a]) / 100.0
-
         qL = out[lhip_col].values[a:b]
         qR = out[rhip_col].values[a:b]
-
         pvL[a:b] = compute_pv_stride(qL, c=cL, enforce_monotonic=enforce_monotonic)
         pvR[a:b] = compute_pv_stride(qR, c=cR, enforce_monotonic=enforce_monotonic)
 
@@ -178,11 +162,8 @@ def compute_phase_variables(df: pd.DataFrame, stride_len: int,
 # ============================================================
 def make_rolling_windows(features: np.ndarray, targets: np.ndarray, window: int):
     """
-    features: (T,D)
-    targets:  (T,K)
-    returns:
-      X: (T-window, window, D)
-      y: (T-window, K) where y[i] corresponds to targets[i+window]
+    X[i] = features[i:i+window]
+    y[i] = targets[i+window]
     """
     T = features.shape[0]
     if T <= window:
@@ -201,19 +182,34 @@ def make_rolling_windows(features: np.ndarray, targets: np.ndarray, window: int)
     return X, y
 
 
-def rollout_from_dataset_next_tick(model, X_full, y_full, start_i, horizon):
+# ============================================================
+# Model output adapter: return NEXT-TICK prediction (N,6) in scaled space
+# ============================================================
+def predict_next_tick_scaled(model, X):
     """
-    Autoregressive rollout in the SAME scaled space as X_full/y_full.
+    Handles:
+      - next-tick models: (N,6)
+      - stride->stride models: (N,51,6)  -> take [:,0,:] as next tick
+    """
+    pred = model.predict(X, verbose=0)
+    pred = np.asarray(pred)
 
-    X_full: (N, WINDOW, D)  dataset windows
-    y_full: (N, K)          dataset targets (next tick)
-    start_i: starting window index
-    horizon: number of predicted steps H
+    if pred.ndim == 2 and pred.shape[1] == 6:
+        return pred.astype(np.float32)
 
-    Returns:
-      pred_scaled: (H, K)
-      gt_scaled:   (H, K)
-      input_window_scaled: (WINDOW, D)  (the initial input window)
+    if pred.ndim == 3 and pred.shape[1] == WINDOW and pred.shape[2] == 6:
+        # stride->next-stride: next tick corresponds to first sample of predicted next stride
+        return pred[:, 0, :].astype(np.float32)
+
+    raise ValueError(f"Unsupported model output shape: {pred.shape}. Expected (N,6) or (N,{WINDOW},6).")
+
+
+def rollout_from_dataset_next_tick_any(model, X_full, y_full, start_i, horizon):
+    """
+    Autoregressive rollout, but prediction step uses predict_next_tick_scaled().
+    Works for:
+      - next-tick models (output 6)
+      - stride->stride models (output 51x6, we take first sample)
     """
     N = len(X_full)
     if start_i < 0 or start_i + horizon >= N:
@@ -227,155 +223,92 @@ def rollout_from_dataset_next_tick(model, X_full, y_full, start_i, horizon):
     gts   = np.zeros((horizon, K), dtype=np.float32)
 
     for h in range(horizon):
-        # predict next tick
-        yhat = model.predict(window.reshape(1, window.shape[0], D), verbose=0)[0]  # (K,)
+        yhat = predict_next_tick_scaled(model, window.reshape(1, WINDOW, D))[0]  # (6,)
         preds[h] = yhat
-        gts[h] = y_full[start_i + h]  # ground truth for this step (aligned)
+        gts[h]   = y_full[start_i + h]
 
-        # build next window:
-        # shift up by 1, append "next features" from dataset where possible
-        # For Timestamp (D=6), next features == predicted angles.
-        # For PV (D=8), next features are [PV_L, PV_R, angles...].
-        # We DO NOT predict PV; we take PV from dataset for correct conditioning.
         if D == 6:
-            next_feat = yhat  # angles-only
+            next_feat = yhat
         else:
-            # D==8: first 2 are PV, last 6 are angles.
-            # Take PV from the dataset at the NEXT window's last timestep:
-            # Equivalent to dataset's "true PV at time (start_i+h+WINDOW)".
-            next_pv = X_full[start_i + h, -1, :2]  # already scaled PV
-            next_feat = np.concatenate([next_pv, yhat], axis=0)  # (8,)
+            # D==8: [PV_L, PV_R, angles...], PV from dataset conditioning
+            next_pv = X_full[start_i + h, -1, :2]
+            next_feat = np.concatenate([next_pv, yhat], axis=0)
 
         window = np.vstack([window[1:], next_feat])
 
     return preds, gts, X_full[start_i]
 
 
-
 # ============================================================
-# Plot helpers
+# Plot helpers (existing + 4-model variants)
 # ============================================================
-def plot_one_stride_one_step(stride_in_deg_51x6: np.ndarray,
-                             pred_next_deg_6: np.ndarray,
-                             gt_next_deg_6: np.ndarray,
-                             title_prefix: str = ""):
-    """
-    Your screenshot style:
-      - blue line: input stride (51 samples)
-      - green x: one-step prediction at sample 51
-      - red x: actual at sample 51
-    """
+def plot_one_stride_one_step(stride_in_deg_51x6, pred_next_deg_6, gt_next_deg_6, title_prefix=""):
     stride = np.asarray(stride_in_deg_51x6)
     pred = np.asarray(pred_next_deg_6).reshape(-1)
     gt   = np.asarray(gt_next_deg_6).reshape(-1)
-
-    if stride.shape != (51, 6):
-        raise ValueError(f"stride shape must be (51,6), got {stride.shape}")
-    if pred.shape != (6,) or gt.shape != (6,):
-        raise ValueError(f"pred/gt must be (6,), got pred={pred.shape} gt={gt.shape}")
 
     x_in = np.arange(51)
     x_next = 51
 
     fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
     axes = axes.flatten()
-
-    # Layout: left column (L hip/knee/ankle), right column (R hip/knee/ankle)
-    placement = [0, 3, 1, 4, 2, 5]  # (LHip,RHip,LKnee,RKnee,LAnk,RAnk) displayed row-wise
-
-    for plot_i, joint_i in enumerate(placement):
-        ax = axes[plot_i]
-        ax.plot(x_in, stride[:, joint_i], linewidth=2, label="input")
-        ax.plot([x_next], [pred[joint_i]], marker="x", markersize=8, linestyle="None",
-                label="one-step-ahead prediction")
-        ax.plot([x_next], [gt[joint_i]], marker="x", markersize=8, linestyle="None",
-                label="actual")
-
-        ax.set_title(JOINT_TITLES[joint_i], fontsize=10)
-        ax.set_xlabel("Time-step")
-        ax.set_ylabel("Angle (degrees)")
-        ax.grid(True)
-
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=True)
-
-    fig.suptitle(f"{title_prefix} (1 stride input → 1-step ahead)", y=0.98)
-    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
-    plt.show()
-
-def plot_rollout_one_step_ahead(
-    input_window_deg: np.ndarray,     # (WINDOW,6)
-    pred_series_deg: np.ndarray,      # (H,6)
-    gt_series_deg: np.ndarray,        # (H,6)
-    title_prefix: str = "",
-):
-    """
-    Reproduces the style:
-      - Blue line: input window (t=0..WINDOW-1)
-      - Green x: one-step-ahead predictions for the rollout horizon (t=WINDOW..WINDOW+H-1)
-      - Red line: actual (ground truth) over the same horizon
-
-    All arrays are in degrees.
-    """
-    inp = np.asarray(input_window_deg)
-    pred = np.asarray(pred_series_deg)
-    gt = np.asarray(gt_series_deg)
-
-    if inp.shape[1] != 6 or pred.shape[1] != 6 or gt.shape[1] != 6:
-        raise ValueError("Expected 6 joints in last dimension.")
-    if pred.shape != gt.shape:
-        raise ValueError(f"pred and gt must have same shape. pred={pred.shape}, gt={gt.shape}")
-
-    W = inp.shape[0]
-    H = pred.shape[0]
-
-    x_in = np.arange(W)                 # 0..W-1
-    x_out = np.arange(W, W + H)         # W..W+H-1
-
-    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
-    axes = axes.flatten()
-
-    # Layout: left column = left joints, right column = right joints, row-wise
     placement = [0, 3, 1, 4, 2, 5]
 
     for plot_i, joint_i in enumerate(placement):
         ax = axes[plot_i]
-
-        # Input window (blue)
-        ax.plot(x_in, inp[:, joint_i], linewidth=2, label="input")
-
-        # Actual over horizon (red line)
-        ax.plot(x_out, gt[:, joint_i], linewidth=2, label="actual")
-
-        # One-step predictions over horizon (green x)
-        ax.plot(x_out, pred[:, joint_i], linestyle="None", marker="x", markersize=6,
-                label="one-step-ahead predictions")
-
+        ax.plot(x_in, stride[:, joint_i], linewidth=2, label="input")
+        ax.plot([x_next], [pred[joint_i]], marker="x", markersize=8, linestyle="None", label="prediction")
+        ax.plot([x_next], [gt[joint_i]], marker="x", markersize=8, linestyle="None", label="actual")
         ax.set_title(JOINT_TITLES[joint_i], fontsize=10)
         ax.set_xlabel("Time-step")
-        ax.set_ylabel("Angle (degrees)")
+        ax.set_ylabel("Angle (deg)")
         ax.grid(True)
 
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=3, frameon=True)
+    fig.suptitle(f"{title_prefix} (1 stride input → 1-step ahead)", y=0.98)
+    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
+    plt.show()
 
+def plot_rollout_one_step_ahead(input_window_deg, pred_series_deg, gt_series_deg, title_prefix=""):
+    inp = np.asarray(input_window_deg)
+    pred = np.asarray(pred_series_deg)
+    gt = np.asarray(gt_series_deg)
+
+    W = inp.shape[0]
+    H = pred.shape[0]
+    x_in = np.arange(W)
+    x_out = np.arange(W, W + H)
+
+    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
+    axes = axes.flatten()
+    placement = [0, 3, 1, 4, 2, 5]
+
+    for plot_i, joint_i in enumerate(placement):
+        ax = axes[plot_i]
+        ax.plot(x_in, inp[:, joint_i], linewidth=2, label="input")
+        ax.plot(x_out, gt[:, joint_i], linewidth=2, label="actual")
+        ax.plot(x_out, pred[:, joint_i], linestyle="None", marker="x", markersize=6, label="predictions")
+        ax.set_title(JOINT_TITLES[joint_i], fontsize=10)
+        ax.set_xlabel("Time-step")
+        ax.set_ylabel("Angle (deg)")
+        ax.grid(True)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=True)
     fig.suptitle(f"{title_prefix} (rolling one-step-ahead rollout)", y=0.98)
     plt.tight_layout(rect=[0, 0.06, 1, 0.96])
     plt.show()
 
-def plot_gt_ts_pv(gt_deg_2d, ts_deg_2d, pv_deg_2d, title="GT vs Timestamp vs PV"):
+def plot_gt_multi(gt_deg_2d, preds_dict_deg_2d, title="GT vs Models"):
     gt = np.asarray(gt_deg_2d)
-    ts = np.asarray(ts_deg_2d)
-    pv = np.asarray(pv_deg_2d)
-    if gt.ndim != 2 or ts.ndim != 2 or pv.ndim != 2:
-        raise ValueError(f"Segment plots require 2D arrays (T,6). Got gt={gt.shape}, ts={ts.shape}, pv={pv.shape}")
-
     t = np.arange(gt.shape[0])
+
     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
         ax.plot(t, gt[:, j], label="GT")
-        ax.plot(t, ts[:, j], label="Timestamp")
-        ax.plot(t, pv[:, j], label="PV")
+        for name, pr in preds_dict_deg_2d.items():
+            ax.plot(t, np.asarray(pr)[:, j], label=name)
         ax.set_ylabel(JOINT_LABELS[j])
         ax.grid(True)
         if j == 0:
@@ -385,21 +318,15 @@ def plot_gt_ts_pv(gt_deg_2d, ts_deg_2d, pv_deg_2d, title="GT vs Timestamp vs PV"
     plt.tight_layout()
     plt.show()
 
-def plot_abs_error(gt_deg_2d, ts_deg_2d, pv_deg_2d, title="|Error| Timestamp vs PV"):
+def plot_abs_error_multi(gt_deg_2d, preds_dict_deg_2d, title="|Error| vs time"):
     gt = np.asarray(gt_deg_2d)
-    ts = np.asarray(ts_deg_2d)
-    pv = np.asarray(pv_deg_2d)
-    if gt.ndim != 2 or ts.ndim != 2 or pv.ndim != 2:
-        raise ValueError(f"Abs-error plots require 2D arrays (T,6). Got gt={gt.shape}, ts={ts.shape}, pv={pv.shape}")
-
     t = np.arange(gt.shape[0])
-    err_ts = np.abs(ts - gt)
-    err_pv = np.abs(pv - gt)
 
     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
-        ax.plot(t, err_ts[:, j], label="|Timestamp - GT|")
-        ax.plot(t, err_pv[:, j], label="|PV - GT|")
+        for name, pr in preds_dict_deg_2d.items():
+            pr = np.asarray(pr)
+            ax.plot(t, np.abs(pr[:, j] - gt[:, j]), label=name)
         ax.set_ylabel(f"{JOINT_LABELS[j]}\n|err| (deg)")
         ax.grid(True)
         if j == 0:
@@ -409,25 +336,23 @@ def plot_abs_error(gt_deg_2d, ts_deg_2d, pv_deg_2d, title="|Error| Timestamp vs 
     plt.tight_layout()
     plt.show()
 
-def plot_residual_hist(ts_deg_2d, pv_deg_2d, gt_deg_2d, title="Residual histograms (Pred - GT)"):
+def plot_residual_hist_multi(gt_deg_2d, preds_dict_deg_2d, title="Residual histograms (Pred - GT)"):
     gt = np.asarray(gt_deg_2d)
-    ts = np.asarray(ts_deg_2d)
-    pv = np.asarray(pv_deg_2d)
-    if gt.ndim != 2 or ts.ndim != 2 or pv.ndim != 2:
-        raise ValueError(f"Residual plots require 2D arrays (T,6). Got gt={gt.shape}, ts={ts.shape}, pv={pv.shape}")
+    names = list(preds_dict_deg_2d.keys())
+    n_models = len(names)
 
-    ts_err = ts - gt
-    pv_err = pv - gt
+    fig, axes = plt.subplots(6, n_models, figsize=(4*n_models + 2, 14))
+    if n_models == 1:
+        axes = np.expand_dims(axes, axis=1)
 
-    fig, axes = plt.subplots(6, 2, figsize=(14, 14))
     for j in range(6):
-        axes[j, 0].hist(ts_err[:, j], bins=60)
-        axes[j, 0].set_title(f"{JOINT_LABELS[j]}: Timestamp")
-        axes[j, 0].grid(True)
-
-        axes[j, 1].hist(pv_err[:, j], bins=60)
-        axes[j, 1].set_title(f"{JOINT_LABELS[j]}: PV")
-        axes[j, 1].grid(True)
+        for m, name in enumerate(names):
+            pr = np.asarray(preds_dict_deg_2d[name])
+            resid = pr[:, j] - gt[:, j]
+            ax = axes[j, m]
+            ax.hist(resid, bins=60)
+            ax.set_title(f"{JOINT_LABELS[j]}: {name}")
+            ax.grid(True)
 
     fig.suptitle(title)
     plt.tight_layout()
@@ -448,24 +373,17 @@ def phase_binned_mean_abs_err(pv_0to1, abs_err_2d, nbins=20):
         out[b] = out[b] / cnt[b] if cnt[b] > 0 else np.nan
     return out
 
-def plot_error_vs_phase(pv_phase_1d, gt_deg_2d, ts_deg_2d, pv_deg_2d, nbins=20, title="Mean |error| vs phase"):
+def plot_error_vs_phase_multi(pv_phase_1d, gt_deg_2d, preds_dict_deg_2d, nbins=20, title="Mean |error| vs phase"):
     gt = np.asarray(gt_deg_2d)
-    ts = np.asarray(ts_deg_2d)
-    pv = np.asarray(pv_deg_2d)
-    if gt.ndim != 2 or ts.ndim != 2 or pv.ndim != 2:
-        raise ValueError(f"Phase plots require 2D arrays (T,6). Got gt={gt.shape}, ts={ts.shape}, pv={pv.shape}")
-
-    err_ts = np.abs(ts - gt)
-    err_pv = np.abs(pv - gt)
-
-    b_ts = phase_binned_mean_abs_err(pv_phase_1d, err_ts, nbins=nbins)
-    b_pv = phase_binned_mean_abs_err(pv_phase_1d, err_pv, nbins=nbins)
     x = (np.arange(nbins) + 0.5) / nbins
 
     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
-        ax.plot(x, b_ts[:, j], label="Timestamp")
-        ax.plot(x, b_pv[:, j], label="PV")
+        for name, pr in preds_dict_deg_2d.items():
+            pr = np.asarray(pr)
+            err = np.abs(pr - gt)
+            b = phase_binned_mean_abs_err(pv_phase_1d, err, nbins=nbins)
+            ax.plot(x, b[:, j], label=name)
         ax.set_ylabel(f"{JOINT_LABELS[j]}\n|err| (deg)")
         ax.grid(True)
         if j == 0:
@@ -488,7 +406,7 @@ def print_metrics(gt_deg_2d, pred_deg_2d, name):
 
 
 # ============================================================
-# Load CP dataset (same structure as PV pipeline, per file)
+# Load CP dataset (PV computed per file)
 # ============================================================
 def load_cp_dataframe_with_pv(cp_folder: str, max_files: int):
     if not os.path.isdir(cp_folder):
@@ -528,155 +446,232 @@ def load_cp_dataframe_with_pv(cp_folder: str, max_files: int):
 # MAIN
 # ============================================================
 def main():
-    # ---- Load models + scalers ----
-    if not os.path.exists(TIMESTAMP_MODEL_PATH):
-        raise FileNotFoundError(f"Timestamp model not found: {TIMESTAMP_MODEL_PATH}")
-    if not os.path.exists(PV_MODEL_PATH):
-        raise FileNotFoundError(f"PV model not found: {PV_MODEL_PATH}")
+    # ---- Check files exist ----
+    paths = [
+        TIMESTAMP_LSTM_MODEL_PATH, PV_LSTM_MODEL_PATH,
+        TIMESTAMP_LSTM_SCALER_PATH, PV_LSTM_SCALER_PV_PATH, PV_LSTM_SCALER_ANGLES_PATH,
+        TIMESTAMP_CNN_MODEL_PATH, TIMESTAMP_CNN_SCALER_PATH,
+        PV_CNN_MODEL_PATH, PV_CNN_SCALER_PV_PATH, PV_CNN_SCALER_ANGLES_PATH
+    ]
+    for p in paths:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Missing: {p}")
 
-    ts_model = load_model(TIMESTAMP_MODEL_PATH)
-    pv_model = load_model(PV_MODEL_PATH)
+    # ---- Load models ----
+    ts_lstm = load_model(TIMESTAMP_LSTM_MODEL_PATH)
+    pv_lstm = load_model(PV_LSTM_MODEL_PATH)
+    ts_cnn  = load_model(TIMESTAMP_CNN_MODEL_PATH)
+    pv_cnn  = load_model(PV_CNN_MODEL_PATH)
 
-    ts_scaler = joblib.load(TIMESTAMP_SCALER_PATH)
-    pv_scaler = joblib.load(PV_SCALER_PV_PATH)
-    pv_ang_scaler = joblib.load(PV_SCALER_ANGLES_PATH)
+    # ---- Load scalers ----
+    ts_lstm_scaler = joblib.load(TIMESTAMP_LSTM_SCALER_PATH)
+
+    pv_lstm_scaler_pv    = joblib.load(PV_LSTM_SCALER_PV_PATH)
+    pv_lstm_scaler_angles= joblib.load(PV_LSTM_SCALER_ANGLES_PATH)
+
+    ts_cnn_scaler = joblib.load(TIMESTAMP_CNN_SCALER_PATH)
+
+    pv_cnn_scaler_pv     = joblib.load(PV_CNN_SCALER_PV_PATH)
+    pv_cnn_scaler_angles = joblib.load(PV_CNN_SCALER_ANGLES_PATH)
 
     # ---- Build CP dataframe with PV + right-shift applied ----
     cp_df = load_cp_dataframe_with_pv(CP_FOLDER, MAX_CP_FILES)
 
-    # ---- Prepare timestamp windows (angles only) ----
-    cp_angles_deg = cp_df[ANGLE_COLS].to_numpy()  # in degrees
-    cp_angles_scaled_ts = ts_scaler.transform(cp_angles_deg)
+    # ---- Base angles in degrees ----
+    cp_angles_deg = cp_df[ANGLE_COLS].to_numpy()
 
-    X_ts, y_ts = make_rolling_windows(cp_angles_scaled_ts, cp_angles_scaled_ts, window=WINDOW)
+    # ---- Build windows for TS-LSTM (angles-only, scaled with ts_lstm_scaler) ----
+    angles_scaled_ts_lstm = ts_lstm_scaler.transform(cp_angles_deg)
+    X_ts_lstm, y_ts_lstm  = make_rolling_windows(angles_scaled_ts_lstm, angles_scaled_ts_lstm, window=WINDOW)
 
-    # ---- Prepare PV windows (pv + angles) ----
+    # ---- Build windows for PV-LSTM (pv+angles, scaled with pv_lstm scalers) ----
     cp_pv = cp_df[PV_COLS].to_numpy()
-    cp_pv_scaled = pv_scaler.transform(cp_pv)
+    pv_scaled_lstm = pv_lstm_scaler_pv.transform(cp_pv)
+    angles_scaled_pv_lstm = pv_lstm_scaler_angles.transform(cp_angles_deg)
+    feat_scaled_pv_lstm = np.concatenate([pv_scaled_lstm, angles_scaled_pv_lstm], axis=1)  # (T,8)
+    X_pv_lstm, y_pv_lstm = make_rolling_windows(feat_scaled_pv_lstm, angles_scaled_pv_lstm, window=WINDOW)
 
-    cp_angles_scaled_pv = pv_ang_scaler.transform(cp_angles_deg)
-    cp_feat_scaled_pv = np.concatenate([cp_pv_scaled, cp_angles_scaled_pv], axis=1)  # (T,8)
+    # ---- Build windows for TS-CNN (angles-only, scaled with ts_cnn_scaler) ----
+    angles_scaled_ts_cnn = ts_cnn_scaler.transform(cp_angles_deg)
+    X_ts_cnn, y_ts_cnn   = make_rolling_windows(angles_scaled_ts_cnn, angles_scaled_ts_cnn, window=WINDOW)
 
-    X_pv, y_pv = make_rolling_windows(cp_feat_scaled_pv, cp_angles_scaled_pv, window=WINDOW)
+    # ---- Build windows for PV-CNN (pv+angles, scaled with pv_cnn scalers) ----
+    pv_scaled_cnn = pv_cnn_scaler_pv.transform(cp_pv)
+    angles_scaled_pv_cnn = pv_cnn_scaler_angles.transform(cp_angles_deg)
+    feat_scaled_pv_cnn = np.concatenate([pv_scaled_cnn, angles_scaled_pv_cnn], axis=1)  # (T,8)
+    X_pv_cnn, y_pv_cnn = make_rolling_windows(feat_scaled_pv_cnn, angles_scaled_pv_cnn, window=WINDOW)
 
-    # ---- Align lengths ----
-    N = min(len(X_ts), len(X_pv))
-    X_ts, y_ts = X_ts[:N], y_ts[:N]
-    X_pv, y_pv = X_pv[:N], y_pv[:N]
+    # ---- Align lengths across all four ----
+    N = min(len(X_ts_lstm), len(X_pv_lstm), len(X_ts_cnn), len(X_pv_cnn))
+    X_ts_lstm, y_ts_lstm = X_ts_lstm[:N], y_ts_lstm[:N]
+    X_pv_lstm, y_pv_lstm = X_pv_lstm[:N], y_pv_lstm[:N]
+    X_ts_cnn,  y_ts_cnn  = X_ts_cnn[:N],  y_ts_cnn[:N]
+    X_pv_cnn,  y_pv_cnn  = X_pv_cnn[:N],  y_pv_cnn[:N]
 
     # ============================================================
-    # (SEGMENT EVALUATION + PLOTS
+    # SEGMENT EVALUATION + PLOTS
     # ============================================================
     T_plot = 600
     start = max(0, N - T_plot)
 
-    X_ts_seg, y_ts_seg = X_ts[start:start + T_plot], y_ts[start:start + T_plot]
-    X_pv_seg, y_pv_seg = X_pv[start:start + T_plot], y_pv[start:start + T_plot]
+    X_ts_lstm_seg, y_ts_lstm_seg = X_ts_lstm[start:start + T_plot], y_ts_lstm[start:start + T_plot]
+    X_pv_lstm_seg, y_pv_lstm_seg = X_pv_lstm[start:start + T_plot], y_pv_lstm[start:start + T_plot]
+    X_ts_cnn_seg,  y_ts_cnn_seg  = X_ts_cnn[start:start + T_plot],  y_ts_cnn[start:start + T_plot]
+    X_pv_cnn_seg,  y_pv_cnn_seg  = X_pv_cnn[start:start + T_plot],  y_pv_cnn[start:start + T_plot]
 
-    pred_ts_seg_scaled = ts_model.predict(X_ts_seg, verbose=0)   # (T_plot,6)
-    pred_pv_seg_scaled = pv_model.predict(X_pv_seg, verbose=0)   # (T_plot,6)
+    # Predict next-tick (scaled) with adapters
+    pred_ts_lstm_scaled = predict_next_tick_scaled(ts_lstm, X_ts_lstm_seg)   # (T,6)
+    pred_pv_lstm_scaled = predict_next_tick_scaled(pv_lstm, X_pv_lstm_seg)   # (T,6)
+    pred_ts_cnn_scaled  = predict_next_tick_scaled(ts_cnn,  X_ts_cnn_seg)    # (T,6) (adapter handles (T,51,6))
+    pred_pv_cnn_scaled  = predict_next_tick_scaled(pv_cnn,  X_pv_cnn_seg)    # (T,6)
 
-    gt_seg_deg = pv_ang_scaler.inverse_transform(y_pv_seg)       # (T_plot,6) degrees
-    pred_ts_seg_deg = ts_scaler.inverse_transform(pred_ts_seg_scaled)
-    pred_pv_seg_deg = pv_ang_scaler.inverse_transform(pred_pv_seg_scaled)
+    # Ground-truth degrees: use PV angle scaler (LSTM) target space for consistency
+    gt_seg_deg = pv_lstm_scaler_angles.inverse_transform(y_pv_lstm_seg)
 
-    print_metrics(gt_seg_deg, pred_ts_seg_deg, "Timestamp")
-    print_metrics(gt_seg_deg, pred_pv_seg_deg, "PV")
+    # Convert each model prediction to degrees using its own angle scaler
+    pred_ts_lstm_deg = ts_lstm_scaler.inverse_transform(pred_ts_lstm_scaled)
+    pred_pv_lstm_deg = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_scaled)
+    pred_ts_cnn_deg  = ts_cnn_scaler.inverse_transform(pred_ts_cnn_scaled)
+    pred_pv_cnn_deg  = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_scaled)
 
-    plot_gt_ts_pv(gt_seg_deg, pred_ts_seg_deg, pred_pv_seg_deg, title="GT vs Timestamp vs PV (CP segment)")
-    plot_abs_error(gt_seg_deg, pred_ts_seg_deg, pred_pv_seg_deg, title="Absolute error comparison (CP segment)")
-    plot_residual_hist(pred_ts_seg_deg, pred_pv_seg_deg, gt_seg_deg, title="Residual histograms (Pred - GT)")
+    # Print metrics (all 4)
+    print_metrics(gt_seg_deg, pred_ts_lstm_deg, "TS-LSTM")
+    print_metrics(gt_seg_deg, pred_pv_lstm_deg, "PV-LSTM")
+    print_metrics(gt_seg_deg, pred_ts_cnn_deg,  "TS-CNN")
+    print_metrics(gt_seg_deg, pred_pv_cnn_deg,  "PV-CNN")
+
+    preds_seg = {
+        "TS-LSTM": pred_ts_lstm_deg,
+        "PV-LSTM": pred_pv_lstm_deg,
+        "TS-CNN":  pred_ts_cnn_deg,
+        "PV-CNN":  pred_pv_cnn_deg,
+    }
+
+    plot_gt_multi(gt_seg_deg, preds_seg, title="GT vs 4 models (CP segment)")
+    plot_abs_error_multi(gt_seg_deg, preds_seg, title="Absolute error (CP segment)")
+
+    plot_residual_hist_multi(gt_seg_deg, preds_seg, title="Residual histograms (Pred - GT)")
 
     # Phase for each tick corresponds to last timestep of each PV window in this segment
-    pv_last_scaled = X_pv_seg[:, -1, :2]  # (T_plot,2)
-    pv_last = pv_scaler.inverse_transform(pv_last_scaled)
+    pv_last_scaled = X_pv_lstm_seg[:, -1, :2]  # (T,2) in pv_lstm scaler space
+    pv_last = pv_lstm_scaler_pv.inverse_transform(pv_last_scaled)
     pv_left = pv_last[:, 0]
 
-    plot_error_vs_phase(pv_left, gt_seg_deg, pred_ts_seg_deg, pred_pv_seg_deg, nbins=20, title="Mean |error| vs phase (binned by PV_Left)")
+    plot_error_vs_phase_multi(
+        pv_left, gt_seg_deg, preds_seg, nbins=20,
+        title="Mean |error| vs phase (binned by PV_Left) - 4 models"
+    )
 
     # Save segment table
-    seg_out = pd.DataFrame(np.hstack([gt_seg_deg, pred_ts_seg_deg, pred_pv_seg_deg]),columns=[f"GT_{c}" for c in ANGLE_COLS] + [f"TS_{c}" for c in ANGLE_COLS] + [f"PV_{c}" for c in ANGLE_COLS])
-    seg_file = os.path.join(PRED_DIR, "compare_ts_vs_pv_cp_segment.xlsx")
+    seg_out = pd.DataFrame(
+        np.hstack([gt_seg_deg,
+                   pred_ts_lstm_deg, pred_pv_lstm_deg,
+                   pred_ts_cnn_deg,  pred_pv_cnn_deg]),
+        columns=([f"GT_{c}" for c in ANGLE_COLS] +
+                 [f"TSLSTM_{c}" for c in ANGLE_COLS] +
+                 [f"PVLSTM_{c}" for c in ANGLE_COLS] +
+                 [f"TSCNN_{c}" for c in ANGLE_COLS] +
+                 [f"PVCNN_{c}" for c in ANGLE_COLS])
+    )
+    seg_file = os.path.join(PRED_DIR, "compare_4models_cp_segment.xlsx")
     seg_out.to_excel(seg_file, index=False)
     print(f"\nSaved segment comparison to: {seg_file}")
 
     # ============================================================
-    # SINGLE-STRIDE ONE-STEP-AHEAD
+    # SINGLE-STRIDE ONE-STEP-AHEAD (4 models)
     # ============================================================
-    k = 5  # stride index (change as you like)
+    k = 5
     a = k * STRIDE_LEN
     b = a + STRIDE_LEN
-
     if b >= len(cp_df):
         raise ValueError(f"Stride k={k} too close to end of cp_df (b={b} >= {len(cp_df)})")
     if a >= N:
         raise ValueError(f"Stride k={k} too large for rolling window arrays (a={a} >= N={N})")
 
-    # Input stride (degrees)
-    stride_in_deg = cp_angles_deg[a:b]             # (51,6)
-    gt_next_deg = cp_angles_deg[b]                # (6,) the next sample after the stride
+    stride_in_deg = cp_angles_deg[a:b]   # (51,6)
+    gt_next_deg   = cp_angles_deg[b]     # (6,)
+    i = a
 
-    i = a  # window starts at a, predicts at a+51 = b
+    # TS-LSTM one-step
+    pred_ts_lstm_one_scaled = predict_next_tick_scaled(ts_lstm, X_ts_lstm[i:i+1])[0]
+    pred_ts_lstm_one_deg = ts_lstm_scaler.inverse_transform(pred_ts_lstm_one_scaled.reshape(1,-1))[0]
 
-    # Timestamp one-step prediction
-    pred_ts_one_scaled = ts_model.predict(X_ts[i:i+1], verbose=0)[0]
-    pred_ts_one_deg = ts_scaler.inverse_transform(pred_ts_one_scaled.reshape(1, -1))[0]
+    # PV-LSTM one-step
+    pred_pv_lstm_one_scaled = predict_next_tick_scaled(pv_lstm, X_pv_lstm[i:i+1])[0]
+    pred_pv_lstm_one_deg = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_one_scaled.reshape(1,-1))[0]
 
-    # PV one-step prediction
-    pred_pv_one_scaled = pv_model.predict(X_pv[i:i+1], verbose=0)[0]
-    pred_pv_one_deg = pv_ang_scaler.inverse_transform(pred_pv_one_scaled.reshape(1, -1))[0]
+    # TS-CNN one-step (adapter handles 51x6 output)
+    pred_ts_cnn_one_scaled = predict_next_tick_scaled(ts_cnn, X_ts_cnn[i:i+1])[0]
+    pred_ts_cnn_one_deg = ts_cnn_scaler.inverse_transform(pred_ts_cnn_one_scaled.reshape(1,-1))[0]
 
-    plot_one_stride_one_step(stride_in_deg, pred_ts_one_deg, gt_next_deg, title_prefix="Timestamp model")
-    plot_one_stride_one_step(stride_in_deg, pred_pv_one_deg, gt_next_deg, title_prefix="Phase-variable model")
+    # PV-CNN one-step
+    pred_pv_cnn_one_scaled = predict_next_tick_scaled(pv_cnn, X_pv_cnn[i:i+1])[0]
+    pred_pv_cnn_one_deg = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_one_scaled.reshape(1,-1))[0]
 
-    # Save the single-stride point for documentation
-    one_df = pd.DataFrame( np.vstack([gt_next_deg, pred_ts_one_deg, pred_pv_one_deg]), index=["GT_next", "Timestamp_next", "PV_next"], columns=ANGLE_COLS)
-    one_file = os.path.join(PRED_DIR, f"compare_single_stride_k{k}_next_tick.xlsx")
+    plot_one_stride_one_step(stride_in_deg, pred_ts_lstm_one_deg, gt_next_deg, title_prefix="TS-LSTM")
+    plot_one_stride_one_step(stride_in_deg, pred_pv_lstm_one_deg, gt_next_deg, title_prefix="PV-LSTM")
+    plot_one_stride_one_step(stride_in_deg, pred_ts_cnn_one_deg,  gt_next_deg, title_prefix="TS-CNN")
+    plot_one_stride_one_step(stride_in_deg, pred_pv_cnn_one_deg,  gt_next_deg, title_prefix="PV-CNN")
+
+    one_df = pd.DataFrame(
+        np.vstack([gt_next_deg,
+                   pred_ts_lstm_one_deg, pred_pv_lstm_one_deg,
+                   pred_ts_cnn_one_deg,  pred_pv_cnn_one_deg]),
+        index=["GT_next", "TS_LSTM_next", "PV_LSTM_next", "TS_CNN_next", "PV_CNN_next"],
+        columns=ANGLE_COLS
+    )
+    one_file = os.path.join(PRED_DIR, f"compare_single_stride_k{k}_next_tick_4models.xlsx")
     one_df.to_excel(one_file)
     print(f"Saved single-stride next-tick table to: {one_file}")
 
-
-    # Choose a rollout horizon (e.g., 250 samples ~ about 5 strides)
+    # ============================================================
+    # ROLLING ONE-STEP-AHEAD ROLLOUT (4 models)
+    # ============================================================
     H = 250
-
-    # Pick a stride-aligned start to make the plot nice
     k = 10
     start_time = k * STRIDE_LEN
-    start_i = start_time  # because WINDOW==51 and windows are built starting at each timestep
+    start_i = start_time
 
-    # --- Timestamp rollout (scaled) ---
-    pred_ts_scaled, gt_ts_scaled, input_ts_scaled = rollout_from_dataset_next_tick(
-        ts_model, X_ts, y_ts, start_i=start_i, horizon=H
+    # --- TS-LSTM rollout ---
+    pred_ts_lstm_scaled, gt_ts_lstm_scaled, input_ts_lstm_scaled = rollout_from_dataset_next_tick_any(
+        ts_lstm, X_ts_lstm, y_ts_lstm, start_i=start_i, horizon=H
     )
+    input_ts_lstm_deg = ts_lstm_scaler.inverse_transform(input_ts_lstm_scaled[:, :6])
+    pred_ts_lstm_deg  = ts_lstm_scaler.inverse_transform(pred_ts_lstm_scaled)
+    gt_ts_lstm_deg    = ts_lstm_scaler.inverse_transform(gt_ts_lstm_scaled)
 
-    # Convert to degrees for plotting
-    input_ts_deg = ts_scaler.inverse_transform(input_ts_scaled[:, :6])  # (51,6)
-    pred_ts_deg = ts_scaler.inverse_transform(pred_ts_scaled)
-    gt_ts_deg   = ts_scaler.inverse_transform(gt_ts_scaled)
+    plot_rollout_one_step_ahead(input_ts_lstm_deg, pred_ts_lstm_deg, gt_ts_lstm_deg, title_prefix="TS-LSTM")
 
-    plot_rollout_one_step_ahead(
-        input_window_deg=input_ts_deg,
-        pred_series_deg=pred_ts_deg,
-        gt_series_deg=gt_ts_deg,
-        title_prefix="Timestamp model"
+    # --- PV-LSTM rollout ---
+    pred_pv_lstm_scaled, gt_pv_lstm_scaled, input_pv_lstm_scaled = rollout_from_dataset_next_tick_any(
+        pv_lstm, X_pv_lstm, y_pv_lstm, start_i=start_i, horizon=H
     )
+    input_pv_lstm_deg = pv_lstm_scaler_angles.inverse_transform(input_pv_lstm_scaled[:, 2:])
+    pred_pv_lstm_deg  = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_scaled)
+    gt_pv_lstm_deg    = pv_lstm_scaler_angles.inverse_transform(gt_pv_lstm_scaled)
 
-    # --- PV rollout (scaled) ---
-    pred_pv_scaled, gt_pv_scaled, input_pv_scaled = rollout_from_dataset_next_tick(
-        pv_model, X_pv, y_pv, start_i=start_i, horizon=H
+    plot_rollout_one_step_ahead(input_pv_lstm_deg, pred_pv_lstm_deg, gt_pv_lstm_deg, title_prefix="PV-LSTM")
+
+    # --- TS-CNN rollout (adapter uses first sample of stride prediction) ---
+    pred_ts_cnn_scaled, gt_ts_cnn_scaled, input_ts_cnn_scaled = rollout_from_dataset_next_tick_any(
+        ts_cnn, X_ts_cnn, y_ts_cnn, start_i=start_i, horizon=H
     )
+    input_ts_cnn_deg = ts_cnn_scaler.inverse_transform(input_ts_cnn_scaled[:, :6])
+    pred_ts_cnn_deg  = ts_cnn_scaler.inverse_transform(pred_ts_cnn_scaled)
+    gt_ts_cnn_deg    = ts_cnn_scaler.inverse_transform(gt_ts_cnn_scaled)
 
-    # For PV input window: last 6 dims are angles
-    input_pv_deg = pv_ang_scaler.inverse_transform(input_pv_scaled[:, 2:])  # (51,6)
-    pred_pv_deg  = pv_ang_scaler.inverse_transform(pred_pv_scaled)
-    gt_pv_deg    = pv_ang_scaler.inverse_transform(gt_pv_scaled)
+    plot_rollout_one_step_ahead(input_ts_cnn_deg, pred_ts_cnn_deg, gt_ts_cnn_deg, title_prefix="TS-CNN")
 
-    plot_rollout_one_step_ahead(
-        input_window_deg=input_pv_deg,
-        pred_series_deg=pred_pv_deg,
-        gt_series_deg=gt_pv_deg,
-        title_prefix="Phase-variable model"
+    # --- PV-CNN rollout ---
+    pred_pv_cnn_scaled, gt_pv_cnn_scaled, input_pv_cnn_scaled = rollout_from_dataset_next_tick_any(
+        pv_cnn, X_pv_cnn, y_pv_cnn, start_i=start_i, horizon=H
     )
+    input_pv_cnn_deg = pv_cnn_scaler_angles.inverse_transform(input_pv_cnn_scaled[:, 2:])
+    pred_pv_cnn_deg  = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_scaled)
+    gt_pv_cnn_deg    = pv_cnn_scaler_angles.inverse_transform(gt_pv_cnn_scaled)
+
+    plot_rollout_one_step_ahead(input_pv_cnn_deg, pred_pv_cnn_deg, gt_pv_cnn_deg, title_prefix="PV-CNN")
+
 
 if __name__ == "__main__":
     main()

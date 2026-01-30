@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-Timestamp CNN stride-to-next-stride prediction (51x6 -> 51x6)
+timestamps_CNN_next_tick.py
+Timestamp CNN rolling next-tick prediction (51x6 -> 6)
 
-This script is intentionally aligned with the timestamp LSTM pipeline:
-  - Fit scaler on Typical only, transform CP with the same scaler
-  - Reshape into strides of length 51
-  - Build (stride_i -> stride_{i+1}) pairs
-  - Train on Typical, validate on Typical+CP, test on CP
-  - Regression metrics: MAE + RMSE (no accuracy)
-  - Autoregressive rollout for future stride prediction
-  - Stride-aligned plotting utilities
+This version is intentionally aligned with your Timestamp LSTM rolling next-tick pipeline:
+  ✅ Fit scaler on Typical only (angles-only)
+  ✅ Transform CP with the same scaler
+  ✅ Build ROLLING windows:
+        X[i] = angles[i : i+51]   (51x6)
+        y[i] = angles[i+51]       (6,)
+  ✅ Train on Typical
+  ✅ Validate on Typical + a small slice of CP
+  ✅ Test on CP
+  ✅ Produce the SAME "LSTM-like" plots:
+        - Single-stride one-step-ahead (blue line + green x + red x)
+        - Rolling one-step-ahead rollout plot (blue input, red GT, green x preds)
+  ✅ Save model + scaler into the same folders:
+        - Saved_Models/Timestamp_cnn_next_tick_model.keras
+        - Scaler/standard_scaler_typical_cnn_next_tick.save
 
-Expected folders/files (same as your LSTM script):
+Expected:
   - Data_Normal/randomized_data_healthy.xlsx
   - Data_CP/*.xlsx  (sheet "Data")
 """
@@ -25,10 +33,11 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape, ZeroPadding1D
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
-# --- Keras save-model version workaround (same pattern as your other scripts)
+
+# --- Keras save-model version workaround (same pattern you used)
 import tensorflow.python.keras as tf_keras
 from keras import __version__
 tf_keras.__version__ = __version__
@@ -37,31 +46,58 @@ tf_keras.__version__ = __version__
 # =============================================================================
 # Configuration
 # =============================================================================
+WINDOW = 51
 STRIDE_LEN = 51
 N_FEATURES = 6
 
 COLUMNS = [
-    'LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
-    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)'
+    "LHipAngles (1)", "LKneeAngles (1)", "LAnkleAngles (1)",
+    "RHipAngles (1)", "RKneeAngles (1)", "RAnkleAngles (1)"
 ]
 
 TYPICAL_XLSX = "Data_Normal/randomized_data_healthy.xlsx"
 CP_FOLDER = "Data_CP/"
+CP_SHEET = "Data"
+CP_SKIPROWS = [1, 2]
+MAX_CP_FILES = 500
 
-# Right-leg cyclic shift (per-stride), if you want to match your previous alignment
-RIGHT_LEG_SHIFT = 25  # samples
-RIGHT_LEG_COLS = ['RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
+# Optional alignment: right-leg cyclic shift INSIDE each stride block
+RIGHT_LEG_SHIFT = 25  # 51 -> 25 is half-stride
+RIGHT_LEG_COLS = ["RHipAngles (1)", "RKneeAngles (1)", "RAnkleAngles (1)"]
 
-# Training hyperparameters (choose to match your LSTM defaults)
+# Training hyperparameters (try to match your LSTM settings)
 LR = 0.001
 EPOCHS = 150
-BATCH_SIZE = 102
+BATCH_SIZE = 512
 DROPOUT = 0.2
 
-# Rollout / plotting
-N_ROLLOUT_STRIDES = 4   # how many future strides to predict for comparison plots
-START_STRIDE_TYPICAL = 1  # start index for rollout (can be negative, like Python indexing)
-START_STRIDE_CP = 1
+# Evaluation plots
+T_PLOT_SEG = 600    # segment length for metrics/plots
+ROLL_H = 250        # rollout horizon
+ROLL_START_STRIDE = 10  # stride-aligned start (start_i = stride * 51)
+
+# Output folders/files
+SAVE_DIR = "Saved_Models"
+SCALER_DIR = "Scaler"
+PRED_DIR = "Predictions"
+PLOT_DIR = "Plots"
+
+MODEL_OUT = os.path.join(SAVE_DIR, "Timestamp_cnn_next_tick_model.keras")
+SCALER_OUT = os.path.join(SCALER_DIR, "standard_scaler_typical_cnn_next_tick.save")
+
+
+# =============================================================================
+# Plot labels (match your thesis plots)
+# =============================================================================
+JOINT_LABELS = ["L Hip", "L Knee", "L Ankle", "R Hip", "R Knee", "R Ankle"]
+JOINT_TITLES = [
+    "Hips Flexion-Extension Left",
+    "Knees Flexion-Extension Left",
+    "Ankles Dorsiflexion-Plantarflexion Left",
+    "Hips Flexion-Extension Right",
+    "Knees Flexion-Extension Right",
+    "Ankles Dorsiflexion-Plantarflexion Right",
+]
 
 
 # =============================================================================
@@ -72,29 +108,26 @@ def ensure_dir(path: str) -> None:
 
 def divergence_fix(df: pd.DataFrame, cols) -> pd.DataFrame:
     """
-    Same idea as your LSTM script: if the first/last diverge too much, nudge them.
-    This is a light "wraparound" fix to avoid extreme endpoint mismatch.
+    Light endpoint nudge to avoid extreme wrap mismatch.
+    (kept because you used something similar)
     """
     if df.empty:
         return df
-
     for col in cols:
         last_value = df[col].values[-1]
         first_value = df[col].values[0]
         divergence = np.abs(last_value - first_value)
-
-        if divergence > 5 or divergence > 2:
-            mean_value = (last_value + first_value) / 2
+        if divergence > 5:
+            mean_value = (last_value + first_value) / 2.0
             df.loc[df.index[-1], col] = mean_value
             df.loc[df.index[0], col] = mean_value
     return df
 
 def stridewise_roll_right_leg(df: pd.DataFrame, stride_len: int, delay: int, right_cols) -> pd.DataFrame:
     """
-    Roll the right-leg columns *inside each stride* to avoid boundary mixing
-    (matches the improved approach from your LSTM codebase).
+    Roll the right-leg columns *inside each stride* so you don't mix stride boundaries.
     """
-    if delay == 0:
+    if delay == 0 or df.empty:
         return df
 
     arr = df[right_cols].to_numpy()
@@ -103,136 +136,200 @@ def stridewise_roll_right_leg(df: pd.DataFrame, stride_len: int, delay: int, rig
         return df
 
     arr = arr[:n].reshape(-1, stride_len, len(right_cols))
-    arr = np.roll(arr, shift=delay, axis=1)  # roll within each stride
+    arr = np.roll(arr, shift=delay, axis=1)
     rolled = arr.reshape(n, len(right_cols))
 
     df2 = df.copy()
     df2.loc[df2.index[:n], right_cols] = rolled
     return df2
 
-def make_next_stride_pairs(strides_51x6: np.ndarray):
-    """X: stride i, Y: stride i+1"""
-    if len(strides_51x6) < 2:
-        raise ValueError("Need at least 2 strides to build next-stride pairs.")
-    return strides_51x6[:-1], strides_51x6[1:]
+def load_cp_concat(cp_folder: str, max_files: int) -> pd.DataFrame:
+    if not os.path.isdir(cp_folder):
+        raise FileNotFoundError(f"CP folder not found: {cp_folder}")
 
-def evaluate_model(model, X, Y, label: str):
-    results = model.evaluate(X, Y, verbose=0)
-    # order: [loss, mae, rmse]
-    loss, mae, rmse = results[0], results[1], results[2]
-    print(f"🔹 {label} Evaluation:")
-    print(f"Loss (MSE): {loss:.4f}, MAE: {mae:.4f}, RMSE: {rmse:.4f}")
-    print("=" * 90)
+    frames = []
+    count = 0
+    for fn in sorted(os.listdir(cp_folder)):
+        if not fn.endswith(".xlsx"):
+            continue
+        fp = os.path.join(cp_folder, fn)
+        try:
+            df = pd.read_excel(fp, sheet_name=CP_SHEET, usecols=COLUMNS, skiprows=CP_SKIPROWS).fillna(0)
+        except Exception as e:
+            print(f"Skipping {fp} (read error): {e}")
+            continue
 
-def predict_future_strides(model, start_stride_scaled_51x6: np.ndarray, num_strides: int, scaler: StandardScaler) -> np.ndarray:
+        frames.append(df)
+        count += 1
+        if count >= max_files:
+            break
+
+    if not frames:
+        raise RuntimeError("No CP files loaded.")
+    out = pd.concat(frames, ignore_index=True).fillna(0)
+    return out
+
+def make_rolling_next_tick_pairs(series_Tx6: np.ndarray, window: int = 51):
     """
-    Autoregressive rollout:
-      start_stride_scaled_51x6: (51,6) in SCALED space
-      returns: (num_strides*51, 6) in ORIGINAL scale
+    series_Tx6: (T,6) scaled
+    X: (T-window, window, 6)
+    y: (T-window, 6)
     """
-    preds_scaled = []
-    current = start_stride_scaled_51x6.reshape(1, STRIDE_LEN, N_FEATURES)
+    T = series_Tx6.shape[0]
+    if T <= window:
+        raise ValueError(f"Not enough timesteps: T={T} for window={window}")
 
-    for _ in range(num_strides):
-        next_stride = model.predict(current, verbose=0)   # (1,51,6)
-        preds_scaled.append(next_stride[0])              # (51,6)
-        current = next_stride                            # feed prediction back in
+    X = np.zeros((T - window, window, 6), dtype=np.float32)
+    y = np.zeros((T - window, 6), dtype=np.float32)
+    for i in range(T - window):
+        X[i] = series_Tx6[i:i+window]
+        y[i] = series_Tx6[i+window]
+    return X, y
 
-    preds_scaled = np.vstack(preds_scaled)               # (num_strides*51, 6)
-    return scaler.inverse_transform(preds_scaled)
+def print_metrics_deg(gt_deg_2d, pred_deg_2d, name):
+    gt = np.asarray(gt_deg_2d)
+    pr = np.asarray(pred_deg_2d)
+    err = pr - gt
+    mae = np.mean(np.abs(err), axis=0)
+    rmse = np.sqrt(np.mean(err**2, axis=0))
+    print(f"\n=== {name} metrics (deg) ===")
+    for j in range(6):
+        print(f"{JOINT_LABELS[j]:6s}  MAE={mae[j]:6.2f}  RMSE={rmse[j]:6.2f}")
+    print("===========================")
 
-def build_gt_future_strides_orig(df_orig: pd.DataFrame, i_start_stride: int, num_strides: int) -> np.ndarray:
+def plot_one_stride_one_step(stride_in_deg_51x6, pred_next_deg_6, gt_next_deg_6, title_prefix=""):
     """
-    Build ground-truth future strides (original scale) for plotting.
-    Returns (num_strides*51, 6) corresponding to strides i_start+1 ... i_start+num_strides.
+    Screenshot-style:
+      - blue line: input stride (51)
+      - green x: prediction at t=51
+      - red x: GT at t=51
     """
-    arr = df_orig[COLUMNS].to_numpy()
-    n_strides = len(arr) // STRIDE_LEN
-    arr = arr[:n_strides * STRIDE_LEN].reshape(n_strides, STRIDE_LEN, N_FEATURES)
+    stride = np.asarray(stride_in_deg_51x6)
+    pred = np.asarray(pred_next_deg_6).reshape(-1)
+    gt   = np.asarray(gt_next_deg_6).reshape(-1)
 
-    # Normalize negative indices
-    if i_start_stride < 0:
-        i_start_stride = n_strides + i_start_stride
+    x_in = np.arange(51)
+    x_next = 51
 
-    i1 = i_start_stride + 1
-    i2 = i_start_stride + 1 + num_strides
-    if i2 > n_strides:
-        raise ValueError(f"Not enough strides for ground truth: start={i_start_stride}, need up to {i2-1}, have {n_strides-1}")
+    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
+    axes = axes.flatten()
+    placement = [0, 3, 1, 4, 2, 5]
 
-    gt = arr[i1:i2].reshape(num_strides * STRIDE_LEN, N_FEATURES)
-    return gt
+    for plot_i, joint_i in enumerate(placement):
+        ax = axes[plot_i]
+        ax.plot(x_in, stride[:, joint_i], linewidth=2, label="input")
+        ax.plot([x_next], [pred[joint_i]], marker="x", markersize=8, linestyle="None", label="prediction")
+        ax.plot([x_next], [gt[joint_i]], marker="x", markersize=8, linestyle="None", label="actual")
+        ax.set_title(JOINT_TITLES[joint_i], fontsize=10)
+        ax.set_xlabel("Time-step")
+        ax.set_ylabel("Angle (deg)")
+        ax.grid(True)
 
-def plot_comparison(predicted: np.ndarray, actual: np.ndarray, title_prefix: str, save_path: str = None):
-    """Plots actual vs predicted joint angles for all 6 channels."""
-    time = np.arange(actual.shape[0])
-
-    labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
-    labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
-
-    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
-
-    for i, name in enumerate(labels_left):
-        axes[i].plot(time, actual[:, i], label=f"Actual {name}")
-        axes[i].plot(time, predicted[:, i], label=f"Predicted {name}", linestyle='dashed')
-        axes[i].set_ylabel("Angle")
-        axes[i].legend()
-        axes[i].set_title(f"{title_prefix}: {name}")
-
-    for i, name in enumerate(labels_right):
-        j = i + 3
-        axes[j].plot(time, actual[:, j], label=f"Actual {name}")
-        axes[j].plot(time, predicted[:, j], label=f"Predicted {name}", linestyle='dashed')
-        axes[j].set_ylabel("Angle")
-        axes[j].legend()
-        axes[j].set_title(f"{title_prefix}: {name}")
-
-    axes[-1].set_xlabel("Time (samples)")
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=200)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=True)
+    fig.suptitle(f"{title_prefix} (1 stride input → 1-step ahead)", y=0.98)
+    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
     plt.show()
 
-def plot_multiple_knee_predictions(actual: np.ndarray, predicted_strides: list, label: str, save_path: str = None):
+def plot_rollout_one_step_ahead(input_window_deg, pred_series_deg, gt_series_deg, title_prefix=""):
     """
-    Knee-only plot for multiple predicted strides stacked in time.
-    actual: (num_strides*51, 6)  original scale
-    predicted_strides: list of (51,6) original-scale strides, length = num_strides
+    LSTM-like rollout:
+      - blue: input window (0..50)
+      - red: GT over horizon (51..)
+      - green x: predictions over horizon
     """
-    pred = np.vstack(predicted_strides)
-    time = np.arange(actual.shape[0])
+    inp = np.asarray(input_window_deg)
+    pred = np.asarray(pred_series_deg)
+    gt = np.asarray(gt_series_deg)
 
-    # Left knee is col 1, right knee is col 4
-    fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+    W = inp.shape[0]
+    H = pred.shape[0]
+    x_in = np.arange(W)
+    x_out = np.arange(W, W + H)
 
-    axes[0].plot(time, actual[:, 1], label=f"Actual LKnee ({label})")
-    axes[0].plot(time, pred[:, 1], label=f"Predicted LKnee ({label})", linestyle='dashed')
-    axes[0].set_ylabel("Angle")
-    axes[0].legend()
-    axes[0].grid(True)
+    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
+    axes = axes.flatten()
+    placement = [0, 3, 1, 4, 2, 5]
 
-    axes[1].plot(time, actual[:, 4], label=f"Actual RKnee ({label})")
-    axes[1].plot(time, pred[:, 4], label=f"Predicted RKnee ({label})", linestyle='dashed')
-    axes[1].set_ylabel("Angle")
-    axes[1].set_xlabel("Time (samples)")
-    axes[1].legend()
-    axes[1].grid(True)
+    for plot_i, joint_i in enumerate(placement):
+        ax = axes[plot_i]
+        ax.plot(x_in, inp[:, joint_i], linewidth=2, label="input")
+        ax.plot(x_out, gt[:, joint_i], linewidth=2, label="actual")
+        ax.plot(x_out, pred[:, joint_i], linestyle="None", marker="x", markersize=6, label="one-step predictions")
+        ax.set_title(JOINT_TITLES[joint_i], fontsize=10)
+        ax.set_xlabel("Time-step")
+        ax.set_ylabel("Angle (deg)")
+        ax.grid(True)
 
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=200)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=True)
+    fig.suptitle(f"{title_prefix} (rolling one-step-ahead rollout)", y=0.98)
+    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
     plt.show()
+
+def rollout_next_tick(model, X_full, y_full, start_i, horizon):
+    """
+    X_full: (N,51,6) scaled
+    y_full: (N,6) scaled
+    """
+    N = len(X_full)
+    if start_i < 0 or start_i + horizon >= N:
+        raise ValueError(f"start_i={start_i} too close to end for horizon={horizon}. N={N}")
+
+    window = X_full[start_i].copy()  # (51,6)
+    preds = np.zeros((horizon, 6), dtype=np.float32)
+    gts   = np.zeros((horizon, 6), dtype=np.float32)
+
+    for h in range(horizon):
+        yhat = model.predict(window.reshape(1, WINDOW, 6), verbose=0)[0]  # (6,)
+        preds[h] = yhat
+        gts[h]   = y_full[start_i + h]
+        window = np.vstack([window[1:], yhat])
+
+    return preds, gts, X_full[start_i]
+
+
+# =============================================================================
+# Build CNN model (51x6 -> 6)
+# =============================================================================
+def build_timestamp_cnn_next_tick(window=51, n_features=6, dropout=0.2):
+    model = Sequential([
+        ZeroPadding1D(padding=2, input_shape=(window, n_features)),
+        Conv1D(filters=32, kernel_size=3, strides=1, padding="same", activation="relu"),
+        MaxPooling1D(pool_size=2, strides=2),
+        Dropout(dropout),
+
+        ZeroPadding1D(padding=2),
+        Conv1D(filters=64, kernel_size=3, strides=1, padding="same", activation="relu"),
+        MaxPooling1D(pool_size=2, strides=2),
+        Dropout(dropout),
+
+        ZeroPadding1D(padding=2),
+        Conv1D(filters=128, kernel_size=3, strides=1, padding="same", activation="relu"),
+        MaxPooling1D(pool_size=2, strides=2),
+        Dropout(dropout),
+
+        Flatten(),
+        Dense(256, activation="relu"),
+        Dropout(dropout),
+        Dense(n_features, activation="linear"),
+    ])
+    model.compile(
+        optimizer=Adam(learning_rate=LR),
+        loss="mse",
+        metrics=["mae", RootMeanSquaredError()]
+    )
+    return model
 
 
 # =============================================================================
 # Main
 # =============================================================================
 def main():
-    # Create directories
-    ensure_dir("Predictions")
-    ensure_dir("Saved_Models")
-    ensure_dir("Scaler")
-    ensure_dir("Plots")
+    ensure_dir(PRED_DIR)
+    ensure_dir(SAVE_DIR)
+    ensure_dir(SCALER_DIR)
+    ensure_dir(PLOT_DIR)
 
     # ----------------------------
     # Load Typical
@@ -240,203 +337,185 @@ def main():
     if not os.path.exists(TYPICAL_XLSX):
         raise FileNotFoundError(f"Typical file not found: {TYPICAL_XLSX}")
 
-    data_typical = pd.read_excel(TYPICAL_XLSX, usecols=COLUMNS)
-    data_typical.fillna(0, inplace=True)
+    df_typ = pd.read_excel(TYPICAL_XLSX, usecols=COLUMNS).fillna(0)
+    if RIGHT_LEG_SHIFT != 0:
+        df_typ = stridewise_roll_right_leg(df_typ, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
+    # ----------------------------
+    # Load CP (concat)
+    # ----------------------------
+    df_cp = load_cp_concat(CP_FOLDER, MAX_CP_FILES)
+    df_cp = divergence_fix(df_cp, COLUMNS)
+
+    # Optional stridewise right-leg roll (keeps alignment consistent with your other work)
+    if RIGHT_LEG_SHIFT != 0:
+        df_cp = stridewise_roll_right_leg(df_cp, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
 
     # ----------------------------
-    # Load CP (concatenate many xlsx files)
-    # ----------------------------
-    if not os.path.isdir(CP_FOLDER):
-        raise FileNotFoundError(f"CP folder not found: {CP_FOLDER}")
-
-    data_cp = pd.DataFrame()
-    file_counter = 0
-    for file_name in os.listdir(CP_FOLDER):
-        if file_name.endswith(".xlsx"):
-            file_counter += 1
-            file_path = os.path.join(CP_FOLDER, file_name)
-            df = pd.read_excel(file_path, "Data", usecols=COLUMNS, skiprows=[1, 2])
-            df.fillna(0, inplace=True)
-            data_cp = pd.concat([data_cp, df], ignore_index=True)
-
-            if file_counter >= 500:
-                break
-
-    data_cp = divergence_fix(data_cp, COLUMNS)
-    data_cp.fillna(0, inplace=True)
-
-    # Optional: per-stride right-leg roll (useful if your CP data is phase-shifted)
-    if RIGHT_LEG_SHIFT != 0 and not data_cp.empty:
-        data_cp = stridewise_roll_right_leg(data_cp, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
-
-    # ----------------------------
-    # Scaling (FIT on Typical, TRANSFORM CP)  ✅ matches LSTM pipeline
+    # Scaling (fit on Typical, transform CP)
     # ----------------------------
     scaler = StandardScaler()
-    typical_scaled = scaler.fit_transform(data_typical[COLUMNS])
-    joblib.dump(scaler, "Scaler/standard_scaler_typical_cnn.save")
+    typ_scaled = scaler.fit_transform(df_typ[COLUMNS]).astype(np.float32)
+    cp_scaled  = scaler.transform(df_cp[COLUMNS]).astype(np.float32)
 
-    cp_scaled = scaler.transform(data_cp[COLUMNS])
-    joblib.dump(scaler, "Scaler/standard_scaler_cp_cnn.save")
-
-    # ----------------------------
-    # Reshape to strides
-    # ----------------------------
-    n_typ = len(typical_scaled) // STRIDE_LEN
-    n_cp = len(cp_scaled) // STRIDE_LEN
-
-    strides_typ = typical_scaled[:n_typ * STRIDE_LEN].reshape(n_typ, STRIDE_LEN, N_FEATURES)
-    strides_cp = cp_scaled[:n_cp * STRIDE_LEN].reshape(n_cp, STRIDE_LEN, N_FEATURES)
-
-    # Build next-stride pairs
-    X_typ, Y_typ = make_next_stride_pairs(strides_typ)
-    X_cp, Y_cp = make_next_stride_pairs(strides_cp)
-
-    # Split indices on pairs (not raw strides)
-    split_idx_typ = max(1, int(0.2 * len(X_typ)))
-    split_idx_cp = max(1, int(0.2 * len(X_cp)))
-
-    # Train on typical (holdout first chunk for val), validate on mix, test on CP
-    X_train, Y_train = X_typ[split_idx_typ:], Y_typ[split_idx_typ:]
-    X_val = np.vstack((X_typ[:split_idx_typ], X_cp[:split_idx_cp]))
-    Y_val = np.vstack((Y_typ[:split_idx_typ], Y_cp[:split_idx_cp]))
-    X_test, Y_test = X_cp, Y_cp
-
-    print(f"Typical strides: {len(strides_typ)}  | pairs: {len(X_typ)}")
-    print(f"CP strides:      {len(strides_cp)}   | pairs: {len(X_cp)}")
-    print(f"Train pairs: {len(X_train)} | Val pairs: {len(X_val)} | Test pairs: {len(X_test)}")
+    joblib.dump(scaler, SCALER_OUT)
+    print(f"Saved scaler to: {SCALER_OUT}")
 
     # ----------------------------
-    # Build CNN model (51x6 -> 51x6)
+    # Build rolling next-tick datasets
     # ----------------------------
-    model = Sequential([
-        # Block 1: 32, 48 then pool
-        ZeroPadding1D(padding=2, input_shape=(STRIDE_LEN, N_FEATURES)),
-        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1,
-            padding='valid', activation='relu'),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1,
-            padding='valid', activation='relu'),
-        MaxPooling1D(pool_size=2, strides=2),
-        Dropout(DROPOUT),
+    X_typ, y_typ = make_rolling_next_tick_pairs(typ_scaled, window=WINDOW)
+    X_cp,  y_cp  = make_rolling_next_tick_pairs(cp_scaled,  window=WINDOW)
 
-        # Block 2: 256, 256 then pool
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1,
-            padding='valid', activation='relu'),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1,
-            padding='valid', activation='relu'),
-        MaxPooling1D(pool_size=2, strides=2),
-        Dropout(DROPOUT),
+    # Split typical for train/val
+    n_typ = len(X_typ)
+    val_n_typ = max(1, int(0.2 * n_typ))
+    X_train, y_train = X_typ[val_n_typ:], y_typ[val_n_typ:]
+    X_val_typ, y_val_typ = X_typ[:val_n_typ], y_typ[:val_n_typ]
 
-        # FC head -> full stride output
-        Flatten(),
-        Dense(256, activation='relu'),
-        Dropout(DROPOUT),
+    # Small CP slice into validation (same spirit as your stride script)
+    n_cp = len(X_cp)
+    val_n_cp = max(1, int(0.2 * n_cp))
+    X_val = np.vstack([X_val_typ, X_cp[:val_n_cp]])
+    y_val = np.vstack([y_val_typ, y_cp[:val_n_cp]])
 
-        Dense(STRIDE_LEN * N_FEATURES, activation='linear'),
-        Reshape((STRIDE_LEN, N_FEATURES))
-    ])
+    # Test on all CP
+    X_test, y_test = X_cp, y_cp
 
-    model.compile(
-        optimizer=Adam(learning_rate=LR),
-        loss='mse',
-        metrics=['mae', RootMeanSquaredError()]
-    )
+    print(f"Typical rolling samples: {len(X_typ)}")
+    print(f"CP rolling samples:      {len(X_cp)}")
+    print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test(CP): {len(X_test)}")
 
+    # ----------------------------
+    # Build + train CNN
+    # ----------------------------
+    model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT)
     model.summary()
 
     history = model.fit(
-        X_train, Y_train,
+        X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        validation_data=(X_val, Y_val),
+        validation_data=(X_val, y_val),
         verbose=1
     )
 
     # ----------------------------
-    # Evaluate + Save
+    # Evaluate (scaled metrics)
     # ----------------------------
-    evaluate_model(model, X_train, Y_train, "Training Data")
-    evaluate_model(model, X_val, Y_val, "Validation Data")
-    evaluate_model(model, X_test, Y_test, "Testing Data")
+    print("\n=== Evaluate (scaled space) ===")
+    tr = model.evaluate(X_train, y_train, verbose=0)
+    va = model.evaluate(X_val, y_val, verbose=0)
+    te = model.evaluate(X_test, y_test, verbose=0)
+    print(f"Train: loss={tr[0]:.6f}  MAE={tr[1]:.6f}  RMSE={tr[2]:.6f}")
+    print(f"Val:   loss={va[0]:.6f}  MAE={va[1]:.6f}  RMSE={va[2]:.6f}")
+    print(f"Test:  loss={te[0]:.6f}  MAE={te[1]:.6f}  RMSE={te[2]:.6f}")
 
-    model.save("Saved_Models/Timestamp_cnn_model.keras", include_optimizer=True)
+    # Save model
+    model.save(MODEL_OUT, include_optimizer=True)
+    print(f"Saved model to: {MODEL_OUT}")
 
     # ----------------------------
-    # Autoregressive rollout plots (stride-aligned, like your LSTM plotting intent)
+    # Segment evaluation in DEGREES (thesis metrics)
     # ----------------------------
-    # Rebuild ORIGINAL strides for GT from the original dataframes
-    # (we keep these in original units, not scaled)
-    data_typical_orig = data_typical.copy()
-    data_cp_orig = data_cp.copy()
+    T_plot = min(T_PLOT_SEG, len(X_test))
+    start = max(0, len(X_test) - T_plot)
 
-    # Choose safe start indices
-    def safe_start(n_strides, requested):
-        idx = requested
-        if idx < 0:
-            idx = n_strides + idx
-        # need idx + N_ROLLOUT_STRIDES <= n_strides - 1 (because we compare future strides)
-        max_start = (n_strides - 1) - N_ROLLOUT_STRIDES
-        return int(np.clip(idx, 0, max_start))
+    X_seg = X_test[start:start+T_plot]
+    y_seg = y_test[start:start+T_plot]
 
-    n_strides_typ = len(strides_typ)
-    n_strides_cp = len(strides_cp)
+    pred_seg_scaled = model.predict(X_seg, verbose=0)  # (T,6)
 
-    start_typ = safe_start(n_strides_typ, START_STRIDE_TYPICAL)
-    start_cp  = safe_start(n_strides_cp,  START_STRIDE_CP)
+    gt_seg_deg   = scaler.inverse_transform(y_seg)
+    pred_seg_deg = scaler.inverse_transform(pred_seg_scaled)
 
-    # Predictions (orig scale)
-    pred_typ = predict_future_strides(model, strides_typ[start_typ], N_ROLLOUT_STRIDES, scaler)
-    pred_cp  = predict_future_strides(model, strides_cp[start_cp],  N_ROLLOUT_STRIDES, scaler)
+    print_metrics_deg(gt_seg_deg, pred_seg_deg, "Timestamp CNN (next-tick)")
 
-    # Ground truth (orig scale)
-    gt_typ = build_gt_future_strides_orig(data_typical_orig, start_typ, N_ROLLOUT_STRIDES)
-    gt_cp  = build_gt_future_strides_orig(data_cp_orig,      start_cp,  N_ROLLOUT_STRIDES)
+    # Save segment predictions
+    seg_out = pd.DataFrame(
+        np.hstack([gt_seg_deg, pred_seg_deg]),
+        columns=[f"GT_{c}" for c in COLUMNS] + [f"CNN_{c}" for c in COLUMNS]
+    )
+    seg_file = os.path.join(PRED_DIR, "timestamp_cnn_next_tick_cp_segment.xlsx")
+    seg_out.to_excel(seg_file, index=False)
+    print(f"Saved segment comparison to: {seg_file}")
 
-    # Save predictions
-    pd.DataFrame(pred_typ, columns=COLUMNS).to_csv("Predictions/predicted_future_strides_typical_cnn.csv", index=False)
-    pd.DataFrame(pred_cp,  columns=COLUMNS).to_csv("Predictions/predicted_future_strides_cp_cnn.csv", index=False)
+    # ----------------------------
+    # Single-stride one-step-ahead plot (LSTM-like)
+    # ----------------------------
+    # For the "single stride input", we need ORIGINAL degrees sequence from CP
+    cp_deg = df_cp[COLUMNS].to_numpy()
+    # pick stride index safely
+    k = 5
+    a = k * STRIDE_LEN
+    b = a + STRIDE_LEN
+    if b >= len(cp_deg):
+        k = max(0, (len(cp_deg) // STRIDE_LEN) - 2)
+        a = k * STRIDE_LEN
+        b = a + STRIDE_LEN
 
-    # Full 6-channel comparison
-    plot_comparison(pred_typ, gt_typ, title_prefix="CNN Typical Rollout",
-                    save_path="Plots/cnn_typical_rollout_all_joints.png")
-    plot_comparison(pred_cp, gt_cp, title_prefix="CNN CP Rollout",
-                    save_path="Plots/cnn_cp_rollout_all_joints.png")
+    stride_in_deg = cp_deg[a:b]          # (51,6)
+    gt_next_deg   = cp_deg[b]            # (6,)
 
-    # Knee-only multi-stride plot (stacked)
-    pred_strides_typ = [pred_typ[i*STRIDE_LEN:(i+1)*STRIDE_LEN, :] for i in range(N_ROLLOUT_STRIDES)]
-    pred_strides_cp  = [pred_cp[i*STRIDE_LEN:(i+1)*STRIDE_LEN, :]  for i in range(N_ROLLOUT_STRIDES)]
+    # build the corresponding scaled window from cp_scaled at the same location
+    # NOTE: X_cp[i] corresponds to cp_scaled[i:i+51], y_cp[i] = cp_scaled[i+51]
+    i = a
+    i = int(np.clip(i, 0, len(X_cp)-1))
+    pred_one_scaled = model.predict(X_cp[i:i+1], verbose=0)[0]
+    pred_one_deg = scaler.inverse_transform(pred_one_scaled.reshape(1, -1))[0]
 
-    plot_multiple_knee_predictions(gt_typ, pred_strides_typ, label="Typical",
-                                   save_path="Plots/cnn_typical_rollout_knees.png")
-    plot_multiple_knee_predictions(gt_cp, pred_strides_cp, label="CP",
-                                   save_path="Plots/cnn_cp_rollout_knees.png")
+    plot_one_stride_one_step(
+        stride_in_deg_51x6=stride_in_deg,
+        pred_next_deg_6=pred_one_deg,
+        gt_next_deg_6=gt_next_deg,
+        title_prefix="Timestamp CNN (rolling next-tick)"
+    )
 
-    # Optional: training curves
+    # ----------------------------
+    # Rolling rollout plot (LSTM-like)
+    # ----------------------------
+    start_i = int(ROLL_START_STRIDE * STRIDE_LEN)
+    start_i = int(np.clip(start_i, 0, len(X_cp) - (ROLL_H + 1)))
+
+    pred_roll_scaled, gt_roll_scaled, input_win_scaled = rollout_next_tick(
+        model, X_cp, y_cp, start_i=start_i, horizon=ROLL_H
+    )
+
+    input_win_deg = scaler.inverse_transform(input_win_scaled)     # (51,6)
+    pred_roll_deg = scaler.inverse_transform(pred_roll_scaled)     # (H,6)
+    gt_roll_deg   = scaler.inverse_transform(gt_roll_scaled)       # (H,6)
+
+    plot_rollout_one_step_ahead(
+        input_window_deg=input_win_deg,
+        pred_series_deg=pred_roll_deg,
+        gt_series_deg=gt_roll_deg,
+        title_prefix="Timestamp CNN (rolling next-tick)"
+    )
+
+    # ----------------------------
+    # Training curves (optional, but useful)
+    # ----------------------------
     plt.figure(figsize=(10, 4))
-    plt.plot(history.history['loss'], label='Training Loss (MSE)')
-    plt.plot(history.history['val_loss'], label='Validation Loss (MSE)')
-    plt.title("CNN Loss over Epochs")
+    plt.plot(history.history["loss"], label="Train Loss (MSE)")
+    plt.plot(history.history["val_loss"], label="Val Loss (MSE)")
+    plt.title("Timestamp CNN (next-tick) Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.legend()
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig("Plots/cnn_loss_curve.png", dpi=200)
+    plt.savefig(os.path.join(PLOT_DIR, "timestamp_cnn_next_tick_loss.png"), dpi=200)
     plt.show()
 
     plt.figure(figsize=(10, 4))
-    plt.plot(history.history['mae'], label='Training MAE')
-    plt.plot(history.history['val_mae'], label='Validation MAE')
-    plt.title("CNN MAE over Epochs")
+    plt.plot(history.history["mae"], label="Train MAE")
+    plt.plot(history.history["val_mae"], label="Val MAE")
+    plt.title("Timestamp CNN (next-tick) MAE")
     plt.xlabel("Epoch")
     plt.ylabel("MAE")
-    plt.legend()
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig("Plots/cnn_mae_curve.png", dpi=200)
+    plt.savefig(os.path.join(PLOT_DIR, "timestamp_cnn_next_tick_mae.png"), dpi=200)
     plt.show()
 
 
