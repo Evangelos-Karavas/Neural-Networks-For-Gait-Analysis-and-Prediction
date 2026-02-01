@@ -171,21 +171,17 @@ def build_cnn_model(input_dim: int, window: int, output_dim: int,
     model = Sequential([
         # Block 1: 32 -> 48 -> pool
         ZeroPadding1D(padding=2, input_shape=(window, input_dim)),
-        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1,
-               padding="valid", activation="relu"),
+        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         ZeroPadding1D(padding=2),
-        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1,
-               padding="valid", activation="relu"),
+        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
         # Block 2: 256 -> 256 -> pool
         ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1,
-               padding="valid", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1,
-               padding="valid", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 

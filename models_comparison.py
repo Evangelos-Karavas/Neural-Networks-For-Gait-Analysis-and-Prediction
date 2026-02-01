@@ -4,11 +4,7 @@ models_comparison_4models.py
 (Timestamp-LSTM vs PV-LSTM vs Timestamp-CNN vs PV-CNN) using a CP stream.
 
 All comparisons are:
-  input window (51 x D) -> predict next angles (6)
-
-Notes:
-- Timestamp-CNN in your timestamps_CNN.py is trained stride->next-stride (51x6 -> 51x6).
-  For next-tick evaluation, we interpret "next tick" as the FIRST sample of the predicted next stride.
+  input windows Timestamp: (51 x 6) | PV: (51 x 8) -> predict next angles (6)
 """
 
 import os
@@ -39,14 +35,15 @@ os.makedirs(PRED_DIR, exist_ok=True)
 TIMESTAMP_LSTM_MODEL_PATH = "Saved_Models/Timestamp_lstm_model.keras"
 TIMESTAMP_LSTM_SCALER_PATH = "Scaler/standard_scaler_typical_lstm.save"
 
+TIMESTAMP_CNN_MODEL_PATH = "Saved_Models/Timestamp_cnn_model.keras"
+TIMESTAMP_CNN_SCALER_PATH = "Scaler/standard_scaler_typical_cnn.save"
+
 PV_LSTM_MODEL_PATH = "Saved_Models\PV_rolling_next_tick_lstm.keras"
 PV_LSTM_SCALER_PV_PATH = "Scaler/scaler_pv.save"
 PV_LSTM_SCALER_ANGLES_PATH = "Scaler/scaler_angles.save"
 
-TIMESTAMP_CNN_MODEL_PATH = "Saved_Models/Timestamp_cnn_model.keras"
-TIMESTAMP_CNN_SCALER_PATH = "Scaler/standard_scaler_typical_cnn.save"
 
-PV_CNN_MODEL_PATH = "Saved_Models/PV_rolling_next_tick_cnn_final.keras"
+PV_CNN_MODEL_PATH = "Saved_Models/PV_rolling_next_tick_cnn.keras"
 PV_CNN_SCALER_PV_PATH = "Scaler/scaler_pv_cnn.save"
 PV_CNN_SCALER_ANGLES_PATH = "Scaler/scaler_angles_cnn.save"
 
@@ -206,8 +203,7 @@ def predict_next_tick_scaled(model, X):
 
 def rollout_from_dataset_next_tick_any(model, X_full, y_full, start_i, horizon):
     """
-    Autoregressive rollout, but prediction step uses predict_next_tick_scaled().
-    Works for:
+    Autoregressive rollout.
       - next-tick models (output 6)
       - stride->stride models (output 51x6, we take first sample)
     """
@@ -230,7 +226,6 @@ def rollout_from_dataset_next_tick_any(model, X_full, y_full, start_i, horizon):
         if D == 6:
             next_feat = yhat
         else:
-            # D==8: [PV_L, PV_R, angles...], PV from dataset conditioning
             next_pv = X_full[start_i + h, -1, :2]
             next_feat = np.concatenate([next_pv, yhat], axis=0)
 
@@ -300,13 +295,13 @@ def plot_rollout_one_step_ahead(input_window_deg, pred_series_deg, gt_series_deg
     plt.tight_layout(rect=[0, 0.06, 1, 0.96])
     plt.show()
 
-def plot_gt_multi(gt_deg_2d, preds_dict_deg_2d, title="GT vs Models"):
+def plot_gt_multi(gt_deg_2d, preds_dict_deg_2d, title="Ground Truth vs Models"):
     gt = np.asarray(gt_deg_2d)
     t = np.arange(gt.shape[0])
 
     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
-        ax.plot(t, gt[:, j], label="GT")
+        ax.plot(t, gt[:, j], label="Ground Truth")
         for name, pr in preds_dict_deg_2d.items():
             ax.plot(t, np.asarray(pr)[:, j], label=name)
         ax.set_ylabel(JOINT_LABELS[j])
@@ -336,7 +331,7 @@ def plot_abs_error_multi(gt_deg_2d, preds_dict_deg_2d, title="|Error| vs time"):
     plt.tight_layout()
     plt.show()
 
-def plot_residual_hist_multi(gt_deg_2d, preds_dict_deg_2d, title="Residual histograms (Pred - GT)"):
+def plot_residual_hist_multi(gt_deg_2d, preds_dict_deg_2d, title="Residual histograms (Pred - Ground Truth)"):
     gt = np.asarray(gt_deg_2d)
     names = list(preds_dict_deg_2d.keys())
     n_models = len(names)
@@ -511,7 +506,7 @@ def main():
     # ============================================================
     # SEGMENT EVALUATION + PLOTS
     # ============================================================
-    T_plot = 600
+    T_plot = 300
     start = max(0, N - T_plot)
 
     X_ts_lstm_seg, y_ts_lstm_seg = X_ts_lstm[start:start + T_plot], y_ts_lstm[start:start + T_plot]
@@ -547,10 +542,10 @@ def main():
         "PV-CNN":  pred_pv_cnn_deg,
     }
 
-    plot_gt_multi(gt_seg_deg, preds_seg, title="GT vs 4 models (CP segment)")
+    plot_gt_multi(gt_seg_deg, preds_seg, title="Ground Truth vs 4 models (CP segment)")
     plot_abs_error_multi(gt_seg_deg, preds_seg, title="Absolute error (CP segment)")
 
-    plot_residual_hist_multi(gt_seg_deg, preds_seg, title="Residual histograms (Pred - GT)")
+    plot_residual_hist_multi(gt_seg_deg, preds_seg, title="Residual histograms (Pred - Ground Truth)")
 
     # Phase for each tick corresponds to last timestep of each PV window in this segment
     pv_last_scaled = X_pv_lstm_seg[:, -1, :2]  # (T,2) in pv_lstm scaler space

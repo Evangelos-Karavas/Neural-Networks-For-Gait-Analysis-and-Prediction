@@ -4,18 +4,18 @@ timestamps_CNN_next_tick.py
 Timestamp CNN rolling next-tick prediction (51x6 -> 6)
 
 This version is intentionally aligned with your Timestamp LSTM rolling next-tick pipeline:
-  ✅ Fit scaler on Typical only (angles-only)
-  ✅ Transform CP with the same scaler
-  ✅ Build ROLLING windows:
+  Fit scaler on Typical only (angles-only)
+  Transform CP with the same scaler
+  Build ROLLING windows:
         X[i] = angles[i : i+51]   (51x6)
         y[i] = angles[i+51]       (6,)
-  ✅ Train on Typical
-  ✅ Validate on Typical + a small slice of CP
-  ✅ Test on CP
-  ✅ Produce the SAME "LSTM-like" plots:
+  Train on Typical
+  Validate on Typical + a small slice of CP
+  Test on CP
+  Produce the SAME "LSTM-like" plots:
         - Single-stride one-step-ahead (blue line + green x + red x)
         - Rolling one-step-ahead rollout plot (blue input, red GT, green x preds)
-  ✅ Save model + scaler into the same folders:
+  Save model + scaler into the same folders:
         - Saved_Models/Timestamp_cnn_next_tick_model.keras
         - Scaler/standard_scaler_typical_cnn_next_tick.save
 
@@ -82,8 +82,8 @@ SCALER_DIR = "Scaler"
 PRED_DIR = "Predictions"
 PLOT_DIR = "Plots"
 
-MODEL_OUT = os.path.join(SAVE_DIR, "Timestamp_cnn_next_tick_model.keras")
-SCALER_OUT = os.path.join(SCALER_DIR, "standard_scaler_typical_cnn_next_tick.save")
+MODEL_OUT = os.path.join(SAVE_DIR, "Timestamp_cnn_model.keras")
+SCALER_OUT = os.path.join(SCALER_DIR, "standard_scaler_typical_cnn.save")
 
 
 # =============================================================================
@@ -233,7 +233,6 @@ def plot_one_stride_one_step(stride_in_deg_51x6, pred_next_deg_6, gt_next_deg_6,
 
 def plot_rollout_one_step_ahead(input_window_deg, pred_series_deg, gt_series_deg, title_prefix=""):
     """
-    LSTM-like rollout:
       - blue: input window (0..50)
       - red: GT over horizon (51..)
       - green x: predictions over horizon
@@ -294,30 +293,32 @@ def rollout_next_tick(model, X_full, y_full, start_i, horizon):
 # =============================================================================
 def build_timestamp_cnn_next_tick(window=51, n_features=6, dropout=0.2):
     model = Sequential([
+        # Block 1: 32 -> 48 -> pool
         ZeroPadding1D(padding=2, input_shape=(window, n_features)),
-        Conv1D(filters=32, kernel_size=3, strides=1, padding="same", activation="relu"),
+        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        ZeroPadding1D(padding=2),
+        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
+        # Block 2: 256 -> 256 -> pool
         ZeroPadding1D(padding=2),
-        Conv1D(filters=64, kernel_size=3, strides=1, padding="same", activation="relu"),
-        MaxPooling1D(pool_size=2, strides=2),
-        Dropout(dropout),
-
+        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         ZeroPadding1D(padding=2),
-        Conv1D(filters=128, kernel_size=3, strides=1, padding="same", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
         Flatten(),
-        Dense(256, activation="relu"),
+        Dense(128, activation="relu"),
         Dropout(dropout),
         Dense(n_features, activation="linear"),
     ])
+
     model.compile(
         optimizer=Adam(learning_rate=LR),
         loss="mse",
-        metrics=["mae", RootMeanSquaredError()]
+        metrics=["mae", RootMeanSquaredError()],
     )
     return model
 
