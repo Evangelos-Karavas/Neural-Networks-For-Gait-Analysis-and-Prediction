@@ -21,7 +21,7 @@ from tensorflow.keras import callbacks, layers, models
 DATA_PATH = Path("Ablation_Study/dynamics_total_augmented.xlsx")
 SHEET_NAME = 0
 
-OUTPUT_DIR = Path("Ablation_Study/data/cnn_modality_outputs")
+OUTPUT_DIR = Path("Ablation_Study/data/lstm_modality_outputs")
 MODELS_DIR = OUTPUT_DIR / "models"
 SCALERS_DIR = OUTPUT_DIR / "scalers"
 PLOTS_DIR = OUTPUT_DIR / "plots"
@@ -155,22 +155,17 @@ def fit_target_scaler(y_train: np.ndarray) -> StandardScaler:
 # -----------------------------------------------------------------------------
 # Model
 # -----------------------------------------------------------------------------
-def build_cnn_model(window: int, n_features: int, n_outputs: int) -> tf.keras.Model:
+def build_lstm_model(window: int, n_features: int, n_outputs: int) -> tf.keras.Model:
     model = models.Sequential([
         layers.Input(shape=(window, n_features)),
-        layers.Conv1D(64, kernel_size=5, activation="relu", padding="same"),
-        layers.BatchNormalization(),
-        layers.Conv1D(64, kernel_size=5, activation="relu", padding="same"),
-        layers.MaxPooling1D(pool_size=2),
+
+        layers.LSTM(128, return_sequences=True),
         layers.Dropout(0.2),
 
-        layers.Conv1D(128, kernel_size=3, activation="relu", padding="same"),
-        layers.BatchNormalization(),
-        layers.Conv1D(128, kernel_size=3, activation="relu", padding="same"),
-        layers.GlobalAveragePooling1D(),
+        layers.LSTM(128, return_sequences=False),
+        layers.Dropout(0.2),
 
         layers.Dense(128, activation="relu"),
-        layers.Dropout(0.2),
         layers.Dense(64, activation="relu"),
         layers.Dense(n_outputs),
     ])
@@ -178,7 +173,10 @@ def build_cnn_model(window: int, n_features: int, n_outputs: int) -> tf.keras.Mo
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss="mse",
-        metrics=[tf.keras.metrics.MeanAbsoluteError(name="mae"), tf.keras.metrics.RootMeanSquaredError(name="rmse")],
+        metrics=[
+            tf.keras.metrics.MeanAbsoluteError(name="mae"),
+            tf.keras.metrics.RootMeanSquaredError(name="rmse"),
+        ],
     )
     return model
 
@@ -279,7 +277,7 @@ def train_modality_model(
     y_train = y_scaler.transform(split["y_train"]).astype(np.float32)
     y_val = y_scaler.transform(split["y_val"]).astype(np.float32)
 
-    model = build_cnn_model(WINDOW, len(feature_cols), len(target_cols))
+    model = build_lstm_model(WINDOW, len(feature_cols), len(target_cols))
 
     cb = [
         callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=6, min_lr=1e-5),
@@ -310,7 +308,7 @@ def train_modality_model(
 
     # Save artifacts
     modality_slug = modality_name.lower().replace(" + ", "_").replace(" ", "_")
-    model_path = MODELS_DIR / f"cnn_{modality_slug}.keras"
+    model_path = MODELS_DIR / f"lstm_{modality_slug}.keras"
     x_scaler_path = SCALERS_DIR / f"x_scaler_{modality_slug}.joblib"
     y_scaler_path = SCALERS_DIR / f"y_scaler_{modality_slug}.joblib"
     history_plot = PLOTS_DIR / f"history_{modality_slug}.png"
@@ -354,9 +352,9 @@ def main() -> None:
         raise ValueError(f"Missing expected kinematic columns: {missing}")
 
     experiment_definitions = {
-        "CNN + kinematics only": kinematic_cols,
-        "CNN + kinetics only": kinetic_cols,
-        "CNN + both": kinetic_cols + kinematic_cols,
+        "LSTM + kinematics only": kinematic_cols,
+        "LSTM + kinetics only": kinetic_cols,
+        "LSTM + both": kinetic_cols + kinematic_cols,
     }
 
     all_results = []
@@ -375,8 +373,8 @@ def main() -> None:
         all_results.append(row)
 
     summary_df = pd.DataFrame(all_results)
-    summary_csv = OUTPUT_DIR / "cnn_modality_summary.csv"
-    summary_xlsx = OUTPUT_DIR / "cnn_modality_summary.xlsx"
+    summary_csv = OUTPUT_DIR / "lstm_modality_summary.csv"
+    summary_xlsx = OUTPUT_DIR / "lstm_modality_summary.xlsx"
     summary_df.to_csv(summary_csv, index=False)
     summary_df.to_excel(summary_xlsx, index=False)
 
