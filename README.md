@@ -85,6 +85,7 @@ Neural-Networks-For-Gait-Analysis-and-Prediction/
 - NumPy, Pandas, Scikit-learn
 - Matplotlib (for visualization)
 - Joblib (for scaler persistence)
+- Cuda Cores Libraries are ncie to have
 
 ### Setup
 
