@@ -90,8 +90,8 @@ Neural-Networks-For-Gait-Analysis-and-Prediction/
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install tensorflow pandas numpy scikit-learn matplotlib joblib openpyxl
+source venv/bin/activate        # For Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 ---
@@ -149,8 +149,3 @@ python Neural_Networks_Timestamps/timestamps_CNN.py
 - **Framework:** TensorFlow/Keras
 - **Related Work:** Master Thesis (NTUA) on the Use of Neural Networks in the Analysis and Prediction of Human GAIT.
 
----
-
-## License
-
-This project is provided as-is for research and educational purposes.
