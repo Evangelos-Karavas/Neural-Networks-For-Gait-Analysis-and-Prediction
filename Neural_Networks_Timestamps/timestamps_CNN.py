@@ -33,14 +33,11 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
-
-# --- Keras save-model version workaround (same pattern you used)
-import tensorflow.python.keras as tf_keras
-from keras import __version__
-tf_keras.__version__ = __version__
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import tensorflow as tf
 
 
 # =============================================================================
@@ -294,18 +291,15 @@ def rollout_next_tick(model, X_full, y_full, start_i, horizon):
 def build_timestamp_cnn_next_tick(window=51, n_features=6, dropout=0.2):
     model = Sequential([
         # Block 1: 32 -> 48 -> pool
-        ZeroPadding1D(padding=2, input_shape=(window, n_features)),
-        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=32, kernel_size=3, strides=2, padding="same", activation="relu",
+               input_shape=(window, n_features)),
+        Conv1D(filters=48, kernel_size=3, strides=2, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
         # Block 2: 256 -> 256 -> pool
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, padding="same", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
@@ -327,6 +321,9 @@ def build_timestamp_cnn_next_tick(window=51, n_features=6, dropout=0.2):
 # Main
 # =============================================================================
 def main():
+    np.random.seed(42)
+    tf.random.set_seed(42)
+
     ensure_dir(PRED_DIR)
     ensure_dir(SAVE_DIR)
     ensure_dir(SCALER_DIR)
@@ -370,17 +367,17 @@ def main():
     # Split typical for train/val
     n_typ = len(X_typ)
     val_n_typ = max(1, int(0.2 * n_typ))
-    X_train, y_train = X_typ[val_n_typ:], y_typ[val_n_typ:]
+    # Temporal gap of WINDOW samples to prevent leakage at val/train boundary
+    X_train, y_train = X_typ[val_n_typ + WINDOW:], y_typ[val_n_typ + WINDOW:]
     X_val_typ, y_val_typ = X_typ[:val_n_typ], y_typ[:val_n_typ]
 
-    # Small CP slice into validation (same spirit as your stride script)
     n_cp = len(X_cp)
     val_n_cp = max(1, int(0.2 * n_cp))
     X_val = np.vstack([X_val_typ, X_cp[:val_n_cp]])
     y_val = np.vstack([y_val_typ, y_cp[:val_n_cp]])
 
-    # Test on all CP
-    X_test, y_test = X_cp, y_cp
+    # Test on CP data NOT used in validation (prevents data leakage)
+    X_test, y_test = X_cp[val_n_cp:], y_cp[val_n_cp:]
 
     print(f"Typical rolling samples: {len(X_typ)}")
     print(f"CP rolling samples:      {len(X_cp)}")
@@ -392,11 +389,15 @@ def main():
     model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT)
     model.summary()
 
+    es_cb = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+    lr_cb = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-5)
+
     history = model.fit(
         X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
+        callbacks=[es_cb, lr_cb],
         verbose=1
     )
 

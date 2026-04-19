@@ -1,0 +1,4 @@
+Model,#Features,Window,Overall MAE,Overall RMSE
+LSTM + kinematics only,6,51,2.213449335,2.981206848
+LSTM + kinetics only,36,51,2.613449335,3.481206848
+LSTM + both,42,51,1.785354733,2.388585336

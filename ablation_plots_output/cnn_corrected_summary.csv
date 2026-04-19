@@ -1,0 +1,4 @@
+Model,#Features,Window,Overall MAE,Overall RMSE
+CNN + kinematics only,6,51,3.395486069,4.93619723
+CNN + kinetics only,36,51,4.104476452,5.681059828
+CNN + both,42,51,2.7433815,3.445594413

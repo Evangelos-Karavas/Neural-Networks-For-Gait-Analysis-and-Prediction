@@ -7,11 +7,12 @@ import joblib
 
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
-from tensorflow.keras.callbacks import Callback
+from tensorflow.keras.callbacks import Callback, EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.models import load_model
+import tensorflow as tf
 
 # ============================================================
 # SETTINGS
@@ -84,29 +85,36 @@ def apply_right_leg_half_stride_offset(
 # ============================================================
 # Phase variable computation
 # ============================================================
-def compute_pv_stride(q: np.ndarray, c: float, enforce_monotonic: bool = True) -> np.ndarray:
+def compute_pv_stride(q: np.ndarray, c: float, enforce_monotonic: bool = True):
     q = q.astype(np.float64)
     N = q.shape[0]
-
     c = float(np.clip(c, 0.05, 0.95))
+
     q0 = float(q[0])
     idx_min = int(np.argmin(q))
     qmin = float(q[idx_min])
 
-    denom = (q0 - qmin)
-    if abs(denom) < 1e-9:
-        s = np.linspace(0.0, 1.0, N, endpoint=False, dtype=np.float32)
-        return np.clip(s, 0.0, 1.0 - 1e-6)
-
+    denom_stance = q0 - qmin  # for S1/S2
     s = np.zeros(N, dtype=np.float64)
-    s[:idx_min + 1] = ((q0 - q[:idx_min + 1]) / denom) * c
-    s[idx_min:] = 1.0 + ((1.0 - c) / denom) * (q[idx_min:] - q0)
+    # S1/S2: stance + pushoff (hip going down to minimum)
+    s[:idx_min + 1] = ((q0 - q[:idx_min + 1]) / denom_stance) * c
+    # sm = phase value at transition from S2 to S3 (should equal c at idx_min)
+    sm = s[idx_min]  # = c by construction
+    # q_h,m = thigh angle at S2->S3 transition
+    qh_m = qmin
+    denom_swing = q0 - qh_m  # for S3/S4
+
+    # S3/S4: preswing + swing (hip going back up)
+    s[idx_min:] = 1.0 + ((1.0 - sm) / denom_swing) * (q[idx_min:] - q0)
 
     s = np.clip(s, 0.0, 1.0)
-    if enforce_monotonic:
-        s = np.maximum.accumulate(s)
 
-    return np.clip(s.astype(np.float32), 0.0, 1.0 - 1e-6)
+    if enforce_monotonic:
+        for i in range(1, N):
+            if s[i] < s[i - 1]:
+                s[i] = s[i - 1]
+
+    return s
 
 
 def compute_phase_variables(
@@ -170,18 +178,15 @@ def build_cnn_model(input_dim: int, window: int, output_dim: int,
     """
     model = Sequential([
         # Block 1: 32 -> 48 -> pool
-        ZeroPadding1D(padding=2, input_shape=(window, input_dim)),
-        Conv1D(filters=32, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=48, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=32, kernel_size=3, strides=2, padding="same", activation="relu",
+               input_shape=(window, input_dim)),
+        Conv1D(filters=48, kernel_size=3, strides=2, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
         # Block 2: 256 -> 256 -> pool
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
-        ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, padding="same", activation="relu"),
+        Conv1D(filters=256, kernel_size=3, strides=2, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
@@ -551,6 +556,9 @@ class DTWRolloutCheckpoint(Callback):
 # MAIN
 # ============================================================
 def main():
+    np.random.seed(42)
+    tf.random.set_seed(42)
+
     os.makedirs(SAVE_DIR, exist_ok=True)
     os.makedirs(PRED_DIR, exist_ok=True)
     os.makedirs(SCALER_DIR, exist_ok=True)
@@ -654,15 +662,16 @@ def main():
     split_typ = max(1, int(0.2 * len(X_typ)))
     split_cp = max(1, int(0.2 * len(X_cp)))
 
-    X_train = X_typ[split_typ:]
-    y_train = y_typ[split_typ:]
+    # Temporal gap of WINDOW samples to prevent leakage at val/train boundary
+    X_train = X_typ[split_typ + WINDOW:]
+    y_train = y_typ[split_typ + WINDOW:]
 
-    # Keep your original validation design (TD + a bit of CP)
     X_val = np.vstack([X_typ[:split_typ], X_cp[:split_cp]])
     y_val = np.vstack([y_typ[:split_typ], y_cp[:split_cp]])
 
-    X_test = X_cp
-    y_test = y_cp
+    # Test on CP data NOT used in validation (prevents data leakage)
+    X_test = X_cp[split_cp:]
+    y_test = y_cp[split_cp:]
 
     print("Shapes:")
     print("X_train", X_train.shape, "y_train", y_train.shape)
@@ -695,12 +704,15 @@ def main():
         every_n_epochs=1,
     )
 
+    es_cb = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+    lr_cb = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-5)
+
     history = model.fit(
         X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
-        callbacks=[dtw_cb],
+        callbacks=[dtw_cb, es_cb, lr_cb],
         verbose=1
     )
 

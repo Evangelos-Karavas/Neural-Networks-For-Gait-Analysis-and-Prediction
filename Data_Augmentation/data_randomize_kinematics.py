@@ -60,35 +60,8 @@ for i in range(num_noisy_cycles):
 
 final_df = pd.concat(randomized_data, ignore_index=True)
 
-def moving_average(data, window_size=7):
-    """
-    Applies a centered moving average to the data.
-    :param data: 1D NumPy array or Pandas Series
-    :param window_size: must be odd
-    :return: smoothed array
-    """
-    return np.convolve(data, np.ones(window_size)/window_size, mode='same')
-
-
-# === Smoothing the entire dataset ===
-columns_to_smooth = ['LHipAngles (1)', 'RHipAngles (1)', 'LKneeAngles (1)', 'RKneeAngles (1)', 
+columns_to_smooth = ['LHipAngles (1)', 'RHipAngles (1)', 'LKneeAngles (1)', 'RKneeAngles (1)',
                    'LAnkleAngles (1)', 'RAnkleAngles (1)']
-
-# Apply filter
-for col in columns_to_smooth:
-    final_df[col] = moving_average(final_df[col].values, window_size=7)
-
-# Wrap-around right leg by 25 steps (cyclic shift)
-delay = 0
-right_leg_columns = [
-    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)', 'Right Foot Off'
-]
-
-# Perform cyclic shift for each right leg column
-for col in right_leg_columns:
-    original = final_df[col].values
-    shifted = np.concatenate([original[-delay:], original[:-delay]])
-    final_df[col] = shifted
 
 def sg_smooth_per_cycle(df, cols, cycle_len=51, window=9, polyorder=3):
     assert window % 2 == 1 and window <= cycle_len

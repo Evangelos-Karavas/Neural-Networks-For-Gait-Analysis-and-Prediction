@@ -10,6 +10,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import tensorflow as tf
 
 
 # ============================================================
@@ -232,6 +234,9 @@ def plot_residual_hist(pred: np.ndarray, gt: np.ndarray, title="Residual histogr
 # MAIN
 # ============================================================
 def main():
+    np.random.seed(42)
+    tf.random.set_seed(42)
+
     os.makedirs(SAVE_DIR, exist_ok=True)
     os.makedirs(PRED_DIR, exist_ok=True)
     os.makedirs(SCALER_DIR, exist_ok=True)
@@ -317,14 +322,16 @@ def main():
     split_typ = max(1, int(0.2 * len(X_typ)))
     split_cp  = max(1, int(0.2 * len(X_cp)))
 
-    X_train = X_typ[split_typ:]
-    y_train = y_typ[split_typ:]
+    # Temporal gap of WINDOW samples to prevent leakage at val/train boundary
+    X_train = X_typ[split_typ + WINDOW:]
+    y_train = y_typ[split_typ + WINDOW:]
 
     X_val = np.vstack([X_typ[:split_typ], X_cp[:split_cp]])
     y_val = np.vstack([y_typ[:split_typ], y_cp[:split_cp]])
 
-    X_test = X_cp
-    y_test = y_cp
+    # Test on CP data NOT used in validation (prevents data leakage)
+    X_test = X_cp[split_cp:]
+    y_test = y_cp[split_cp:]
 
     print("Shapes:")
     print("X_train", X_train.shape, "y_train", y_train.shape)
@@ -338,11 +345,15 @@ def main():
     model = build_model(input_dim=6, window=WINDOW, output_dim=6)
     model.summary()
 
+    es_cb = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+    lr_cb = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-5)
+
     model.fit(
         X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
+        callbacks=[es_cb, lr_cb],
         verbose=1
     )
 

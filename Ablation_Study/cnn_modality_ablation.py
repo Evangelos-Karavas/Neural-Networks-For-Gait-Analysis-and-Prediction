@@ -120,13 +120,15 @@ def chronological_split(
     if min(n_train, n_val, n_test) <= 0:
         raise ValueError("Split sizes are invalid. Reduce val/test ratios or use more data.")
 
+    # Temporal gap of WINDOW samples at boundaries to prevent leakage
+    gap = WINDOW
     return {
         "X_train": X[:n_train],
         "y_train": y[:n_train],
-        "X_val": X[n_train:n_train + n_val],
-        "y_val": y[n_train:n_train + n_val],
-        "X_test": X[n_train + n_val:],
-        "y_test": y[n_train + n_val:],
+        "X_val": X[n_train + gap:n_train + gap + n_val],
+        "y_val": y[n_train + gap:n_train + gap + n_val],
+        "X_test": X[n_train + gap + n_val + gap:],
+        "y_test": y[n_train + gap + n_val + gap:],
     }
 
 
@@ -282,6 +284,7 @@ def train_modality_model(
     model = build_cnn_model(WINDOW, len(feature_cols), len(target_cols))
 
     cb = [
+        callbacks.EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True),
         callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=6, min_lr=1e-5),
     ]
 
