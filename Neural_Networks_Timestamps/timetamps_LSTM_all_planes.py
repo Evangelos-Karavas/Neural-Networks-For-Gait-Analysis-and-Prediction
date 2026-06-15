@@ -24,7 +24,7 @@ EPOCHS = 150
 BATCH_SIZE = 512
 MAX_CP_FILES = 500
 
-TYPICAL_FILE = "Data_Normal/randomized_data_healthy_all_columns.xlsx"
+TYPICAL_FILE = "Data_Normal/dynamics_total_augmented.xlsx"
 CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]

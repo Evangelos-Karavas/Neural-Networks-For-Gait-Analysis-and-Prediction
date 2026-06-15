@@ -62,7 +62,7 @@ COLUMNS = [
 ]
 N_FEATURES = len(COLUMNS)  # 18
 
-TYPICAL_XLSX = "Data_Normal/randomized_data_healthy_all_columns.xlsx"
+TYPICAL_XLSX = "Data_Normal/dynamics_total_augmented.xlsx"
 CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
