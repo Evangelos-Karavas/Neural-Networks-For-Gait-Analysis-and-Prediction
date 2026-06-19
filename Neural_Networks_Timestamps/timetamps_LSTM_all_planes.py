@@ -11,6 +11,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 
 # ============================================================
@@ -115,11 +116,11 @@ def make_rolling_windows(series_TxD: np.ndarray, window: int):
 # ============================================================
 def build_model(input_dim: int, window: int, output_dim: int):
     model = Sequential([
-        LSTM(128, activation="tanh", return_sequences=True, input_shape=(window, input_dim)),
+        LSTM(192, activation="tanh", return_sequences=True, input_shape=(window, input_dim)),
         Dropout(0.2),
-        LSTM(128, activation="tanh", return_sequences=False),
+        LSTM(192, activation="tanh", return_sequences=False),
         Dropout(0.2),
-        Dense(128, activation="relu"),
+        Dense(256, activation="relu"),
         Dense(output_dim, activation="linear"),
     ])
     model.compile(
@@ -310,19 +311,25 @@ def main():
     typ_df = apply_right_leg_half_stride_offset_angles(typ_df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
     # -------------------------
-    # Load CP (per file, shift per file, then concat)
+    # Load CP (subject-level split: train/val/test by file, not by row)
     # -------------------------
     if not os.path.isdir(CP_FOLDER):
         raise FileNotFoundError(f"CP folder not found: {CP_FOLDER}")
 
-    cp_frames = []
-    file_counter = 0
+    cp_files = [fn for fn in sorted(os.listdir(CP_FOLDER)) if fn.endswith(".xlsx")][:MAX_CP_FILES]
+    if not cp_files:
+        raise RuntimeError("No CP files found.")
 
-    for fn in sorted(os.listdir(CP_FOLDER)):
-        if not fn.endswith(".xlsx"):
-            continue
+    rng = np.random.RandomState(42)
+    perm = rng.permutation(len(cp_files))
+    n_train = int(0.70 * len(cp_files))
+    n_val   = int(0.15 * len(cp_files))
+    train_idx = set(perm[:n_train])
+    val_idx   = set(perm[n_train:n_train + n_val])
+
+    cp_train_frames, cp_val_frames, cp_test_frames = [], [], []
+    for i, fn in enumerate(cp_files):
         fp = os.path.join(CP_FOLDER, fn)
-
         try:
             df = pd.read_excel(
                 fp,
@@ -337,40 +344,50 @@ def main():
         # IMPORTANT: shift right leg within each file (prevents boundary artifacts)
         df = apply_right_leg_half_stride_offset_angles(df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
-        cp_frames.append(df)
-        file_counter += 1
-        if file_counter >= MAX_CP_FILES:
-            break
+        if i in train_idx:
+            cp_train_frames.append(df)
+        elif i in val_idx:
+            cp_val_frames.append(df)
+        else:
+            cp_test_frames.append(df)
 
-    if not cp_frames:
-        raise RuntimeError("No CP files loaded. Check CP_FOLDER / sheet / columns.")
+    if not cp_train_frames or not cp_val_frames or not cp_test_frames:
+        raise RuntimeError("CP subject-level split produced an empty train/val/test group.")
 
-    cp_df = pd.concat(cp_frames, ignore_index=True).fillna(0)
+    cp_train_df = pd.concat(cp_train_frames, ignore_index=True).fillna(0)
+    cp_val_df   = pd.concat(cp_val_frames,   ignore_index=True).fillna(0)
+    cp_df       = pd.concat(cp_test_frames,  ignore_index=True).fillna(0)  # held-out CP test subjects
+    print(f"[INFO] CP subjects: {len(cp_train_frames)} train / {len(cp_val_frames)} val / {len(cp_test_frames)} test")
 
     # -------------------------
-    # Scale angles (single scaler fit on Typical)
+    # Scale angles (fit on Typical + CP-train, transform CP-val/CP-test)
     # -------------------------
     scaler = StandardScaler()
-    typ_scaled = scaler.fit_transform(typ_df[ANGLE_COLS].to_numpy()).astype(np.float32)
-    cp_scaled  = scaler.transform(cp_df[ANGLE_COLS].to_numpy()).astype(np.float32)
+    fit_df = pd.concat([typ_df[ANGLE_COLS], cp_train_df[ANGLE_COLS]], ignore_index=True)
+    scaler.fit(fit_df.to_numpy())
+    typ_scaled      = scaler.transform(typ_df[ANGLE_COLS].to_numpy()).astype(np.float32)
+    cp_train_scaled = scaler.transform(cp_train_df[ANGLE_COLS].to_numpy()).astype(np.float32)
+    cp_val_scaled   = scaler.transform(cp_val_df[ANGLE_COLS].to_numpy()).astype(np.float32)
+    cp_scaled       = scaler.transform(cp_df[ANGLE_COLS].to_numpy()).astype(np.float32)  # held-out CP test subjects
 
     joblib.dump(scaler, SCALER_OUT)
     print("Saved scaler to:", SCALER_OUT)
 
     # -------------------------
-    # Rolling windows
+    # Rolling windows (per split, so windows never cross a split boundary)
     # -------------------------
-    X_typ, y_typ = make_rolling_windows(typ_scaled, window=WINDOW)
-    X_cp,  y_cp  = make_rolling_windows(cp_scaled,  window=WINDOW)
+    X_typ,      y_typ      = make_rolling_windows(typ_scaled,      window=WINDOW)
+    X_cp_train, y_cp_train = make_rolling_windows(cp_train_scaled, window=WINDOW)
+    X_cp_val,   y_cp_val   = make_rolling_windows(cp_val_scaled,   window=WINDOW)
+    X_cp,       y_cp       = make_rolling_windows(cp_scaled,       window=WINDOW)
 
     split_typ = max(1, int(0.2 * len(X_typ)))
-    split_cp  = max(1, int(0.2 * len(X_cp)))
 
-    X_train = X_typ[split_typ:]
-    y_train = y_typ[split_typ:]
+    X_train = np.vstack([X_typ[split_typ:], X_cp_train])
+    y_train = np.vstack([y_typ[split_typ:], y_cp_train])
 
-    X_val = np.vstack([X_typ[:split_typ], X_cp[:split_cp]])
-    y_val = np.vstack([y_typ[:split_typ], y_cp[:split_cp]])
+    X_val = np.vstack([X_typ[:split_typ], X_cp_val])
+    y_val = np.vstack([y_typ[:split_typ], y_cp_val])
 
     X_test = X_cp
     y_test = y_cp
@@ -388,11 +405,15 @@ def main():
     model = build_model(input_dim=N_FEATURES, window=WINDOW, output_dim=N_FEATURES)
     model.summary()
 
+    es_cb = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
+    lr_cb = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
+
     history = model.fit(
         X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
+        callbacks=[es_cb, lr_cb],
         verbose=1
     )
 

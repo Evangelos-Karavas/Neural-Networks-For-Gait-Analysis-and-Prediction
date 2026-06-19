@@ -206,11 +206,11 @@ def make_rolling_windows(features: np.ndarray, targets: np.ndarray, window: int)
 # ============================================================
 def build_model(input_dim: int, window: int, output_dim: int):
     model = Sequential([
-        LSTM(128, activation="tanh", return_sequences=True, input_shape=(window, input_dim)),
+        LSTM(192, activation="tanh", return_sequences=True, input_shape=(window, input_dim)),
         Dropout(0.2),
-        LSTM(128, activation="tanh", return_sequences=False),
+        LSTM(192, activation="tanh", return_sequences=False),
         Dropout(0.2),
-        Dense(128, activation="relu"),
+        Dense(256, activation="relu"),
         Dense(output_dim, activation="linear"),
     ])
     model.compile(
@@ -561,14 +561,24 @@ def main():
 
     plot_pv_sanity(typ_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="Typical")
 
-    # ── Load CP ────────────────────────────────────────────────────
+    # ── Load CP (subject-level split: train/val/test by file, not by row) ──
     if not os.path.isdir(CP_FOLDER):
         raise FileNotFoundError(f"CP folder not found: {CP_FOLDER}")
 
-    cp_frames = []
-    for fn in sorted(os.listdir(CP_FOLDER)):
-        if not fn.endswith(".xlsx"):
-            continue
+    cp_files = [fn for fn in sorted(os.listdir(CP_FOLDER)) if fn.endswith(".xlsx")][:MAX_CP_FILES]
+    if not cp_files:
+        raise RuntimeError("No CP files found.")
+
+    rng = np.random.RandomState(42)
+    perm = rng.permutation(len(cp_files))
+    n_train = int(0.70 * len(cp_files))
+    n_val   = int(0.15 * len(cp_files))
+    train_idx = set(perm[:n_train])
+    val_idx   = set(perm[n_train:n_train + n_val])
+    # remaining indices go to test
+
+    cp_train_frames, cp_val_frames, cp_test_frames = [], [], []
+    for i, fn in enumerate(cp_files):
         fp = os.path.join(CP_FOLDER, fn)
         try:
             df = pd.read_excel(
@@ -581,44 +591,65 @@ def main():
             continue
         df = compute_phase_variables(df, STRIDE_LEN, LHIP_COL, RHIP_COL, LFO_COL, RFO_COL)
         df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS)
-        cp_frames.append(df)
-        if len(cp_frames) >= MAX_CP_FILES:
-            break
+        if i in train_idx:
+            cp_train_frames.append(df)
+        elif i in val_idx:
+            cp_val_frames.append(df)
+        else:
+            cp_test_frames.append(df)
 
-    if not cp_frames:
-        raise RuntimeError("No CP files loaded.")
-    cp_df = pd.concat(cp_frames, ignore_index=True).fillna(0)
+    if not cp_train_frames or not cp_val_frames or not cp_test_frames:
+        raise RuntimeError("CP subject-level split produced an empty train/val/test group.")
+
+    cp_train_df = pd.concat(cp_train_frames, ignore_index=True).fillna(0)
+    cp_val_df   = pd.concat(cp_val_frames,   ignore_index=True).fillna(0)
+    cp_test_df  = pd.concat(cp_test_frames,  ignore_index=True).fillna(0)
+    cp_df       = pd.concat([cp_train_df, cp_val_df, cp_test_df], ignore_index=True)  # for stride-aligned plots
+
+    print(f"[INFO] CP subjects: {len(cp_train_frames)} train / {len(cp_val_frames)} val / {len(cp_test_frames)} test")
 
     plot_pv_sanity(cp_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="CP")
 
-    # ── Scale PV and angles separately ─────────────────────────────
+    # ── Scale (fit on Typical + CP-train, so the training distribution is represented) ──
     scaler_pv  = StandardScaler()
     scaler_ang = StandardScaler()
 
-    typ_pv_sc  = scaler_pv.fit_transform(typ_df[PV_COLS].to_numpy())
-    typ_ang_sc = scaler_ang.fit_transform(typ_df[ANGLE_COLS].to_numpy())
-    cp_pv_sc   = scaler_pv.transform(cp_df[PV_COLS].to_numpy())
-    cp_ang_sc  = scaler_ang.transform(cp_df[ANGLE_COLS].to_numpy())
+    fit_pv_df  = pd.concat([typ_df[PV_COLS],     cp_train_df[PV_COLS]],     ignore_index=True)
+    fit_ang_df = pd.concat([typ_df[ANGLE_COLS],  cp_train_df[ANGLE_COLS]],  ignore_index=True)
+    scaler_pv.fit(fit_pv_df.to_numpy())
+    scaler_ang.fit(fit_ang_df.to_numpy())
+
+    typ_pv_sc       = scaler_pv.transform(typ_df[PV_COLS].to_numpy())
+    typ_ang_sc      = scaler_ang.transform(typ_df[ANGLE_COLS].to_numpy())
+    cp_train_pv_sc  = scaler_pv.transform(cp_train_df[PV_COLS].to_numpy())
+    cp_train_ang_sc = scaler_ang.transform(cp_train_df[ANGLE_COLS].to_numpy())
+    cp_val_pv_sc    = scaler_pv.transform(cp_val_df[PV_COLS].to_numpy())
+    cp_val_ang_sc   = scaler_ang.transform(cp_val_df[ANGLE_COLS].to_numpy())
+    cp_test_pv_sc   = scaler_pv.transform(cp_test_df[PV_COLS].to_numpy())
+    cp_test_ang_sc  = scaler_ang.transform(cp_test_df[ANGLE_COLS].to_numpy())
 
     joblib.dump(scaler_pv,  os.path.join(SCALER_DIR, "scaler_pv_lstm_18ch.save"))
     joblib.dump(scaler_ang, os.path.join(SCALER_DIR, "scaler_angles_lstm_18ch.save"))
 
-    typ_feats = np.concatenate([typ_pv_sc, typ_ang_sc], axis=1)  # (T, 20)
-    cp_feats  = np.concatenate([cp_pv_sc,  cp_ang_sc],  axis=1)
+    typ_feats      = np.concatenate([typ_pv_sc,      typ_ang_sc],      axis=1)  # (T, 20)
+    cp_train_feats = np.concatenate([cp_train_pv_sc, cp_train_ang_sc], axis=1)
+    cp_val_feats   = np.concatenate([cp_val_pv_sc,   cp_val_ang_sc],   axis=1)
+    cp_test_feats  = np.concatenate([cp_test_pv_sc,  cp_test_ang_sc],  axis=1)
 
-    # ── Rolling windows ─────────────────────────────────────────────
-    X_typ, y_typ = make_rolling_windows(typ_feats, typ_ang_sc, WINDOW)
-    X_cp,  y_cp  = make_rolling_windows(cp_feats,  cp_ang_sc,  WINDOW)
+    # ── Rolling windows (built per split so windows never cross a split boundary) ──
+    X_typ,      y_typ      = make_rolling_windows(typ_feats,      typ_ang_sc,      WINDOW)
+    X_cp_train, y_cp_train = make_rolling_windows(cp_train_feats, cp_train_ang_sc, WINDOW)
+    X_cp_val,   y_cp_val   = make_rolling_windows(cp_val_feats,   cp_val_ang_sc,   WINDOW)
+    X_cp_test,  y_cp_test  = make_rolling_windows(cp_test_feats,  cp_test_ang_sc,  WINDOW)
 
     split_typ = max(1, int(0.2 * len(X_typ)))
-    split_cp  = max(1, int(0.2 * len(X_cp)))
 
-    X_train = X_typ[split_typ + WINDOW:]
-    y_train = y_typ[split_typ + WINDOW:]
-    X_val   = np.vstack([X_typ[:split_typ], X_cp[:split_cp]])
-    y_val   = np.vstack([y_typ[:split_typ], y_cp[:split_cp]])
-    X_test  = X_cp[split_cp:]
-    y_test  = y_cp[split_cp:]
+    X_train = np.vstack([X_typ[split_typ + WINDOW:], X_cp_train])
+    y_train = np.vstack([y_typ[split_typ + WINDOW:], y_cp_train])
+    X_val   = np.vstack([X_typ[:split_typ], X_cp_val])
+    y_val   = np.vstack([y_typ[:split_typ], y_cp_val])
+    X_test  = X_cp_test
+    y_test  = y_cp_test
 
     print(f"Train: {len(X_train)}  Val: {len(X_val)}  Test: {len(X_test)}")
     print(f"Input dim: {X_train.shape[2]}  Output dim: {y_train.shape[1]}")

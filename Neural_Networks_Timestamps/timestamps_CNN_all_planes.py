@@ -36,6 +36,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 # --- Keras save-model version workaround (same pattern you used)
 import tensorflow.python.keras as tf_keras
@@ -180,31 +181,45 @@ def stridewise_roll_right_leg(df: pd.DataFrame, stride_len: int, delay: int, rig
     df2.loc[df2.index[:n], right_cols] = rolled
     return df2
 
-def load_cp_concat(cp_folder: str, max_files: int) -> pd.DataFrame:
+def load_cp_split(cp_folder: str, max_files: int, train_frac: float = 0.70, val_frac: float = 0.15, seed: int = 42):
+    """Subject-level (file-level) CP split so train/val/test never share a trial."""
     if not os.path.isdir(cp_folder):
         raise FileNotFoundError(f"CP folder not found: {cp_folder}")
 
-    frames = []
-    count = 0
-    for fn in sorted(os.listdir(cp_folder)):
-        if not fn.endswith(".xlsx"):
-            continue
+    cp_files = [fn for fn in sorted(os.listdir(cp_folder)) if fn.endswith(".xlsx")][:max_files]
+    if not cp_files:
+        raise RuntimeError("No CP files found.")
+
+    rng = np.random.RandomState(seed)
+    perm = rng.permutation(len(cp_files))
+    n_train = int(train_frac * len(cp_files))
+    n_val   = int(val_frac * len(cp_files))
+    train_idx = set(perm[:n_train])
+    val_idx   = set(perm[n_train:n_train + n_val])
+
+    train_frames, val_frames, test_frames = [], [], []
+    for i, fn in enumerate(cp_files):
         fp = os.path.join(cp_folder, fn)
         try:
             df = pd.read_excel(fp, sheet_name=CP_SHEET, usecols=COLUMNS, skiprows=CP_SKIPROWS).fillna(0)
         except Exception as e:
             print(f"Skipping {fp} (read error): {e}")
             continue
+        if i in train_idx:
+            train_frames.append(df)
+        elif i in val_idx:
+            val_frames.append(df)
+        else:
+            test_frames.append(df)
 
-        frames.append(df)
-        count += 1
-        if count >= max_files:
-            break
+    if not train_frames or not val_frames or not test_frames:
+        raise RuntimeError("CP subject-level split produced an empty train/val/test group.")
 
-    if not frames:
-        raise RuntimeError("No CP files loaded.")
-    out = pd.concat(frames, ignore_index=True).fillna(0)
-    return out
+    df_train = pd.concat(train_frames, ignore_index=True).fillna(0)
+    df_val   = pd.concat(val_frames,   ignore_index=True).fillna(0)
+    df_test  = pd.concat(test_frames,  ignore_index=True).fillna(0)
+    print(f"[INFO] CP subjects: {len(train_frames)} train / {len(val_frames)} val / {len(test_frames)} test")
+    return df_train, df_val, df_test
 
 def make_rolling_next_tick_pairs(series_TxD: np.ndarray, window: int = 51):
     """
@@ -363,16 +378,16 @@ def build_timestamp_cnn_next_tick(window=51, n_features=18, dropout=0.2):
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
-        # Block 2: 256 -> 256 -> pool
+        # Block 2: 384 -> 384 -> pool
         ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=384, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         ZeroPadding1D(padding=2),
-        Conv1D(filters=256, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
+        Conv1D(filters=384, kernel_size=3, strides=2, dilation_rate=1, padding="same", activation="relu"),
         MaxPooling1D(pool_size=2, strides=2),
         Dropout(dropout),
 
         Flatten(),
-        Dense(128, activation="relu"),
+        Dense(256, activation="relu"),
         Dropout(dropout),
         Dense(n_features, activation="linear"),
     ])
@@ -405,47 +420,56 @@ def main():
         df_typ = stridewise_roll_right_leg(df_typ, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
 
     # ----------------------------
-    # Load CP (concat)
+    # Load CP (subject-level split: train/val/test by file, not by row)
     # ----------------------------
-    df_cp = load_cp_concat(CP_FOLDER, MAX_CP_FILES)
-    df_cp = divergence_fix(df_cp, COLUMNS)
+    df_cp_train, df_cp_val, df_cp = load_cp_split(CP_FOLDER, MAX_CP_FILES)
+    df_cp_train = divergence_fix(df_cp_train, COLUMNS)
+    df_cp_val   = divergence_fix(df_cp_val,   COLUMNS)
+    df_cp       = divergence_fix(df_cp,       COLUMNS)
 
     if RIGHT_LEG_SHIFT != 0:
-        df_cp = stridewise_roll_right_leg(df_cp, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
+        df_cp_train = stridewise_roll_right_leg(df_cp_train, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
+        df_cp_val   = stridewise_roll_right_leg(df_cp_val,   STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
+        df_cp       = stridewise_roll_right_leg(df_cp,       STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
 
     # ----------------------------
-    # Scaling (fit on Typical, transform CP)
+    # Scaling (fit on Typical + CP-train, transform CP-val/CP-test)
     # ----------------------------
     scaler = StandardScaler()
-    typ_scaled = scaler.fit_transform(df_typ[COLUMNS]).astype(np.float32)
-    cp_scaled  = scaler.transform(df_cp[COLUMNS]).astype(np.float32)
+    fit_df = pd.concat([df_typ[COLUMNS], df_cp_train[COLUMNS]], ignore_index=True)
+    scaler.fit(fit_df)
+    typ_scaled      = scaler.transform(df_typ[COLUMNS]).astype(np.float32)
+    cp_train_scaled = scaler.transform(df_cp_train[COLUMNS]).astype(np.float32)
+    cp_val_scaled   = scaler.transform(df_cp_val[COLUMNS]).astype(np.float32)
+    cp_scaled       = scaler.transform(df_cp[COLUMNS]).astype(np.float32)  # held-out CP test subjects
 
     joblib.dump(scaler, SCALER_OUT)
     print(f"Saved scaler to: {SCALER_OUT}")
 
     # ----------------------------
-    # Build rolling next-tick datasets
+    # Build rolling next-tick datasets (per split, so windows never cross a split boundary)
     # ----------------------------
-    X_typ, y_typ = make_rolling_next_tick_pairs(typ_scaled, window=WINDOW)
-    X_cp,  y_cp  = make_rolling_next_tick_pairs(cp_scaled,  window=WINDOW)
+    X_typ,      y_typ      = make_rolling_next_tick_pairs(typ_scaled,      window=WINDOW)
+    X_cp_train, y_cp_train = make_rolling_next_tick_pairs(cp_train_scaled, window=WINDOW)
+    X_cp_val,   y_cp_val   = make_rolling_next_tick_pairs(cp_val_scaled,   window=WINDOW)
+    X_cp,       y_cp       = make_rolling_next_tick_pairs(cp_scaled,       window=WINDOW)
 
     # Split typical for train/val
     n_typ = len(X_typ)
     val_n_typ = max(1, int(0.2 * n_typ))
-    X_train, y_train = X_typ[val_n_typ:], y_typ[val_n_typ:]
     X_val_typ, y_val_typ = X_typ[:val_n_typ], y_typ[:val_n_typ]
 
-    # Small CP slice into validation
-    n_cp = len(X_cp)
-    val_n_cp = max(1, int(0.2 * n_cp))
-    X_val = np.vstack([X_val_typ, X_cp[:val_n_cp]])
-    y_val = np.vstack([y_val_typ, y_cp[:val_n_cp]])
+    X_train = np.vstack([X_typ[val_n_typ:], X_cp_train])
+    y_train = np.vstack([y_typ[val_n_typ:], y_cp_train])
 
-    # Test on all CP
+    X_val = np.vstack([X_val_typ, X_cp_val])
+    y_val = np.vstack([y_val_typ, y_cp_val])
+
+    # Test on held-out CP subjects only
     X_test, y_test = X_cp, y_cp
 
     print(f"Typical rolling samples: {len(X_typ)}")
-    print(f"CP rolling samples:      {len(X_cp)}")
+    print(f"CP rolling samples (train/val/test): {len(X_cp_train)}/{len(X_cp_val)}/{len(X_cp)}")
     print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test(CP): {len(X_test)}")
     print(f"Feature dims: {N_FEATURES} (inputs) -> {N_FEATURES} (outputs)")
 
@@ -455,11 +479,15 @@ def main():
     model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT)
     model.summary()
 
+    es_cb = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
+    lr_cb = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
+
     history = model.fit(
         X_train, y_train,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
+        callbacks=[es_cb, lr_cb],
         verbose=1
     )
 
