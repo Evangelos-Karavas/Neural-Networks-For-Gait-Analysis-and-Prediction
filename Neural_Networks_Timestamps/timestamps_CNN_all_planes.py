@@ -90,10 +90,10 @@ ROLL_H = 250        # rollout horizon
 ROLL_START_STRIDE = 10  # stride-aligned start (start_i = stride * 51)
 
 # Output folders/files
-SAVE_DIR = "Saved_Models"
-SCALER_DIR = "Scaler"
-PRED_DIR = "Predictions"
-PLOT_DIR = "Plots"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
+PRED_DIR = "Neural_Networks_Output/Predictions"
+PLOT_DIR = "Neural_Networks_Output/Plots"
 
 MODEL_OUT = os.path.join(SAVE_DIR, "Timestamp_cnn_next_tick_model_18.keras")
 SCALER_OUT = os.path.join(SCALER_DIR, "standard_scaler_typical_cnn_next_tick_18.save")
@@ -528,7 +528,7 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val_multi),
-        callbacks=[es_cb, lr_cb],
+        callbacks=[ lr_cb],
         verbose=1
     )
 

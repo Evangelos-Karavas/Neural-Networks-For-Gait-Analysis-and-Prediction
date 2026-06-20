@@ -30,10 +30,10 @@ CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
 
-SAVE_DIR = "Saved_Models"
-PRED_DIR = "Predictions"
-SCALER_DIR = "Scaler"
-PLOT_DIR = "Plots"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+PRED_DIR = "Neural_Networks_Output/Predictions"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
+PLOT_DIR = "Neural_Networks_Output/Plots"
 
 # 18 columns: 6 joints (L/R hip,knee,ankle) x 3 planes (1,2,3)
 ANGLE_COLS = [
@@ -305,10 +305,9 @@ def main():
     if missing:
         raise KeyError(f"Typical file missing columns: {sorted(missing)}")
 
+    # Right-leg half-stride shift is already baked into TYPICAL_FILE by the
+    # data augmentation step (Data_Augmentation/data_randomize_kinetics.py).
     typ_df = typ_df[ANGLE_COLS].fillna(0)
-
-    # Apply right-leg alignment (stridewise)
-    typ_df = apply_right_leg_half_stride_offset_angles(typ_df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
     # -------------------------
     # Load CP (subject-level split: group by real patient ID, not by file)
@@ -428,7 +427,7 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
-        callbacks=[es_cb, lr_cb],
+        callbacks=[ lr_cb],
         verbose=1
     )
 

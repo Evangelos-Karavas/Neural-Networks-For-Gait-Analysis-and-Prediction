@@ -29,9 +29,9 @@ CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
 
-SAVE_DIR = "Saved_Models"
-PRED_DIR = "Predictions"
-SCALER_DIR = "Scaler"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+PRED_DIR = "Neural_Networks_Output/Predictions"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
 
 ANGLE_COLS = [
     "LHipAngles (1)", "LKneeAngles (1)", "LAnkleAngles (1)",
@@ -572,20 +572,16 @@ def main():
     if not os.path.exists(TYPICAL_FILE):
         raise FileNotFoundError(f"Typical file not found: {TYPICAL_FILE}")
 
+    # PhaseVariable_Left/Right and the right-leg half-stride shift are already
+    # baked into TYPICAL_FILE by the data augmentation step
+    # (Data_Augmentation/data_randomize_kinematics.py).
     typ_df = pd.read_excel(TYPICAL_FILE).copy()
-    needed = set(ANGLE_COLS + [LFO_COL, RFO_COL])
+    needed = set(ANGLE_COLS + PV_COLS)
     missing = needed.difference(typ_df.columns)
     if missing:
         raise KeyError(f"Typical file missing columns: {sorted(missing)}")
 
-    typ_df = typ_df[ANGLE_COLS + [LFO_COL, RFO_COL]].fillna(0)
-
-    typ_df = compute_phase_variables(
-        typ_df, STRIDE_LEN, LHIP_COL, RHIP_COL, LFO_COL, RFO_COL, enforce_monotonic=True
-    )
-    typ_df = apply_right_leg_half_stride_offset(
-        typ_df, STRIDE_LEN, RIGHT_ANGLE_COLS, pv_right_col="PhaseVariable_Right"
-    )
+    typ_df = typ_df[ANGLE_COLS + PV_COLS].fillna(0)
 
     plot_pv_sanity(typ_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="Typical")
     plot_pv_left_right_overlay(typ_df, title="Typical: PV Left & Right (full, overlay)", max_samples=51 * 10)

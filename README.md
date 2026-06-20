@@ -33,7 +33,7 @@ The trained models are designed to be integrated with ROS2 for real-time lower-l
     - **Phase Variable-based:** Using normalized gait phases for prediction
     - **Timestamp-based:** Using time-series data directly
 - **Data Preprocessing:** Automatic data augmentation and normalization pipelines
-- **Model Persistence:** Saved Keras models and StandardScaler objects for deployment
+- **Model Persistence:** Saved Keras models and StandardNeural_Networks_Outputs/Scaler objects for deployment
 
 ---
 
@@ -55,21 +55,21 @@ Neural-Networks-For-Gait-Analysis-and-Prediction/
 │   ├── timestamps_CNN.py
 │   └── timetamps_LSTM.py
 │
-├── Saved_Models/
+├── Neural_Networks_Outputs/Saved_Models/
 │   ├── PV_best_rollout_cnn.keras
 │   ├── PV_rolling_next_tick_cnn.keras
 │   ├── PV_rolling_next_tick_lstm.keras
 │   ├── Timestamp_cnn_model.keras
 │   └── Timestamp_lstm_model.keras
 │
-├── Scaler/
-│   ├── scaler_angles_cnn.save
-│   ├── scaler_angles.save
-│   ├── scaler_pv_cnn.save
-│   ├── scaler_pv.save
-│   ├── standard_scaler_cp_lstm.save
-│   ├── standard_scaler_typical_cnn.save
-│   └── standard_scaler_typical_lstm.save
+├── Neural_Networks_Outputs/Scaler/
+│   ├── neural_networks_outputs/scaler_angles_cnn.save
+│   ├── neural_networks_outputs/scaler_angles.save
+│   ├── neural_networks_outputs/scaler_pv_cnn.save
+│   ├── neural_networks_outputs/scaler_pv.save
+│   ├── standard_neural_networks_outputs/scaler_cp_lstm.save
+│   ├── standard_neural_networks_outputs/scaler_typical_cnn.save
+│   └── standard_neural_networks_outputs/scaler_typical_lstm.save
 │
 └── Predictions/
 ```
@@ -84,7 +84,7 @@ Neural-Networks-For-Gait-Analysis-and-Prediction/
 - TensorFlow/Keras 2.10+
 - NumPy, Pandas, Scikit-learn
 - Matplotlib (for visualization)
-- Joblib (for scaler persistence)
+- Joblib (for neural_networks_outputs/scaler persistence)
 - Cuda Cores Libraries are ncie to have
 
 ### Setup

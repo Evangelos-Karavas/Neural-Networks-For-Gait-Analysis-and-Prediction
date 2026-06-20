@@ -41,6 +41,62 @@ FULL_COLS = ALL_COLS + FOOT_OFF_COLS
 RIGHT_COLS = [c for c in ALL_COLS if c.startswith(('RHip', 'RKnee', 'RAnkle'))]
 SHIFT = STRIDE // 2  # 25
 
+LHIP_COL = 'LHipAngles (1)'
+RHIP_COL = 'RHipAngles (1)'
+LFO_COL  = 'Left Foot Off'
+RFO_COL  = 'Right Foot Off'
+PV_COLS  = ['PhaseVariable_Left', 'PhaseVariable_Right']
+
+
+# ------------------------------------------
+# Phase variable computation (matches the phase-variable network scripts)
+# ------------------------------------------
+def compute_pv_stride(q: np.ndarray, c: float, enforce_monotonic: bool = True) -> np.ndarray:
+    q = q.astype(np.float64)
+    N = q.shape[0]
+    c = float(np.clip(c, 0.05, 0.95))
+
+    q0 = float(q[0])
+    idx_min = int(np.argmin(q))
+    qmin = float(q[idx_min])
+
+    denom_stance = q0 - qmin
+    s = np.zeros(N, dtype=np.float64)
+    s[:idx_min + 1] = ((q0 - q[:idx_min + 1]) / denom_stance) * c
+    sm = s[idx_min]
+    qh_m = qmin
+    denom_swing = q0 - qh_m
+    s[idx_min:] = 1.0 + ((1.0 - sm) / denom_swing) * (q[idx_min:] - q0)
+    s = np.clip(s, 0.0, 1.0)
+
+    if enforce_monotonic:
+        for i in range(1, N):
+            if s[i] < s[i - 1]:
+                s[i] = s[i - 1]
+
+    return s
+
+
+def compute_phase_variables(df, stride_len, lhip_col, rhip_col, lfo_col, rfo_col, enforce_monotonic=True):
+    n_strides = len(df) // stride_len
+    out = df.iloc[:n_strides * stride_len].copy()
+
+    pvL = np.zeros(len(out), dtype=np.float32)
+    pvR = np.zeros(len(out), dtype=np.float32)
+
+    for s in range(n_strides):
+        a, b = s * stride_len, (s + 1) * stride_len
+        cL = float(out[lfo_col].iloc[a]) / 100.0
+        cR = float(out[rfo_col].iloc[a]) / 100.0
+        qL = out[lhip_col].values[a:b]
+        qR = out[rhip_col].values[a:b]
+        pvL[a:b] = compute_pv_stride(qL, c=cL, enforce_monotonic=enforce_monotonic)
+        pvR[a:b] = compute_pv_stride(qR, c=cR, enforce_monotonic=enforce_monotonic)
+
+    out["PhaseVariable_Left"] = pvL
+    out["PhaseVariable_Right"] = pvR
+    return out
+
 # ==========================================
 # Load all data from Data_Normal
 # ==========================================
@@ -61,14 +117,22 @@ for file in os.listdir(DATA_FOLDER):
 merged = pd.concat(all_data, ignore_index=True)
 
 # ==========================================
+# Phase variable computation
+# (must run on the unshifted data: it's anchored to the start of each stride)
+# ==========================================
+merged = compute_phase_variables(merged, STRIDE, LHIP_COL, RHIP_COL, LFO_COL, RFO_COL)
+FULL_COLS = FULL_COLS + PV_COLS
+
+# ==========================================
 # Apply right-leg phase shift per stride
-# (avoids cross-boundary artifacts)
+# (avoids cross-boundary artifacts; PhaseVariable_Right rides along with the
+# right-leg signals it was computed from)
 # ==========================================
 n_strides_total = len(merged) // STRIDE
 merged = merged.iloc[:n_strides_total * STRIDE].reset_index(drop=True)
 
-arr      = merged.values.copy()
-right_idx = [FULL_COLS.index(c) for c in RIGHT_COLS]
+arr      = merged[FULL_COLS].values.copy()
+right_idx = [FULL_COLS.index(c) for c in RIGHT_COLS + ['PhaseVariable_Right']]
 
 for s in range(n_strides_total):
     a, b = s * STRIDE, (s + 1) * STRIDE
@@ -116,9 +180,11 @@ for i in range(NUM_NOISY_CYCLES):
 
     noisy_cycle = base_cycle + noise
 
-    # Restore foot-off values (no noise on event markers)
+    # Restore foot-off values and phase variables (no noise on event markers/derived signals)
     noisy_cycle['Left Foot Off']  = base_cycle['Left Foot Off']
     noisy_cycle['Right Foot Off'] = base_cycle['Right Foot Off']
+    noisy_cycle['PhaseVariable_Left']  = base_cycle['PhaseVariable_Left']
+    noisy_cycle['PhaseVariable_Right'] = base_cycle['PhaseVariable_Right']
 
     randomized_data.append(noisy_cycle)
 

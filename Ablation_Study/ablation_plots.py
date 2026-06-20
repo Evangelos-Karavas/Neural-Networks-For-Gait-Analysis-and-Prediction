@@ -36,7 +36,7 @@ def save_single_network_plot(df, network_name, out_dir, mae_ylim=None, rmse_ylim
     mae = df["Overall MAE"].tolist()
     rmse = df["Overall RMSE"].tolist()
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+    fig, axes = plt.subneural_networks_outputs/plots(1, 2, figsize=(13, 5.5))
     plot_metric(
         axes[0], labels, mae,
         f"{network_name} - Overall MAE",
@@ -62,7 +62,7 @@ def save_single_network_plot(df, network_name, out_dir, mae_ylim=None, rmse_ylim
 def save_combined_comparison_plot(cnn_df, lstm_df, out_dir, mae_ylim=None, rmse_ylim=None):
     labels = ["Kinematics", "Kinetics", "Both"]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subneural_networks_outputs/plots(2, 2, figsize=(14, 10))
 
     plot_metric(
         axes[0, 0], labels, cnn_df["Overall MAE"].tolist(),
@@ -91,7 +91,7 @@ def save_combined_comparison_plot(cnn_df, lstm_df, out_dir, mae_ylim=None, rmse_
 
 
 def main():
-    out_dir = Path("ablation_plots_output")
+    out_dir = Path("ablation_neural_networks_outputs/plots_output")
     out_dir.mkdir(exist_ok=True)
 
     # Corrected data from the user

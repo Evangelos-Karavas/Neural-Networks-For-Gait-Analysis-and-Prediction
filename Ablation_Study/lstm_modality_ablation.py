@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardNeural_Networks_Outputs/Scaler
 import tensorflow as tf
 from tensorflow.keras import callbacks, layers, models
 
@@ -23,8 +23,8 @@ SHEET_NAME = 0
 
 OUTPUT_DIR = Path("Ablation_Study/data/lstm_modality_outputs")
 MODELS_DIR = OUTPUT_DIR / "models"
-SCALERS_DIR = OUTPUT_DIR / "scalers"
-PLOTS_DIR = OUTPUT_DIR / "plots"
+NEURAL_NETWORKS_OUTPUTS/SCALERS_DIR = OUTPUT_DIR / "neural_networks_outputs/scalers"
+NEURAL_NETWORKS_OUTPUTS/PLOTS_DIR = OUTPUT_DIR / "neural_networks_outputs/plots"
 
 WINDOW = 51
 TEST_RATIO = 0.15
@@ -133,25 +133,25 @@ def chronological_split(
 
 
 
-def fit_feature_scaler(X_train: np.ndarray) -> StandardScaler:
-    scaler = StandardScaler()
-    scaler.fit(X_train.reshape(-1, X_train.shape[-1]))
-    return scaler
+def fit_feature_neural_networks_outputs/scaler(X_train: np.ndarray) -> StandardNeural_Networks_Outputs/Scaler:
+    neural_networks_outputs/scaler = StandardNeural_Networks_Outputs/Scaler()
+    neural_networks_outputs/scaler.fit(X_train.reshape(-1, X_train.shape[-1]))
+    return neural_networks_outputs/scaler
 
 
 
-def transform_window_data(X: np.ndarray, scaler: StandardScaler) -> np.ndarray:
+def transform_window_data(X: np.ndarray, neural_networks_outputs/scaler: StandardNeural_Networks_Outputs/Scaler) -> np.ndarray:
     shape = X.shape
     flat = X.reshape(-1, shape[-1])
-    flat_scaled = scaler.transform(flat)
+    flat_scaled = neural_networks_outputs/scaler.transform(flat)
     return flat_scaled.reshape(shape).astype(np.float32)
 
 
 
-def fit_target_scaler(y_train: np.ndarray) -> StandardScaler:
-    scaler = StandardScaler()
-    scaler.fit(y_train)
-    return scaler
+def fit_target_neural_networks_outputs/scaler(y_train: np.ndarray) -> StandardNeural_Networks_Outputs/Scaler:
+    neural_networks_outputs/scaler = StandardNeural_Networks_Outputs/Scaler()
+    neural_networks_outputs/scaler.fit(y_train)
+    return neural_networks_outputs/scaler
 
 
 # -----------------------------------------------------------------------------
@@ -184,7 +184,7 @@ def build_lstm_model(window: int, n_features: int, n_outputs: int) -> tf.keras.M
 
 
 # -----------------------------------------------------------------------------
-# Evaluation / plots
+# Evaluation / neural_networks_outputs/plots
 # -----------------------------------------------------------------------------
 def per_joint_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, Dict[str, float]]:
     metrics = {}
@@ -228,7 +228,7 @@ def save_prediction_plot(
     n_points = min(n_points, len(y_true))
     t = np.arange(n_points)
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
+    fig, axes = plt.subneural_networks_outputs/plots(3, 2, figsize=(12, 9), sharex=True)
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
@@ -269,15 +269,15 @@ def train_modality_model(
     X, y = build_windows(x_raw, y_raw, window=WINDOW)
     split = chronological_split(X, y, val_ratio=VAL_RATIO, test_ratio=TEST_RATIO)
 
-    x_scaler = fit_feature_scaler(split["X_train"])
-    y_scaler = fit_target_scaler(split["y_train"])
+    x_neural_networks_outputs/scaler = fit_feature_neural_networks_outputs/scaler(split["X_train"])
+    y_neural_networks_outputs/scaler = fit_target_neural_networks_outputs/scaler(split["y_train"])
 
-    X_train = transform_window_data(split["X_train"], x_scaler)
-    X_val = transform_window_data(split["X_val"], x_scaler)
-    X_test = transform_window_data(split["X_test"], x_scaler)
+    X_train = transform_window_data(split["X_train"], x_neural_networks_outputs/scaler)
+    X_val = transform_window_data(split["X_val"], x_neural_networks_outputs/scaler)
+    X_test = transform_window_data(split["X_test"], x_neural_networks_outputs/scaler)
 
-    y_train = y_scaler.transform(split["y_train"]).astype(np.float32)
-    y_val = y_scaler.transform(split["y_val"]).astype(np.float32)
+    y_train = y_neural_networks_outputs/scaler.transform(split["y_train"]).astype(np.float32)
+    y_val = y_neural_networks_outputs/scaler.transform(split["y_val"]).astype(np.float32)
 
     model = build_lstm_model(WINDOW, len(feature_cols), len(target_cols))
 
@@ -298,7 +298,7 @@ def train_modality_model(
     )
 
     y_pred_scaled = model.predict(X_test, verbose=0)
-    y_pred = y_scaler.inverse_transform(y_pred_scaled)
+    y_pred = y_neural_networks_outputs/scaler.inverse_transform(y_pred_scaled)
     y_true = split["y_test"]
 
     metrics = {
@@ -312,15 +312,15 @@ def train_modality_model(
     # Save artifacts
     modality_slug = modality_name.lower().replace(" + ", "_").replace(" ", "_")
     model_path = MODELS_DIR / f"lstm_{modality_slug}.keras"
-    x_scaler_path = SCALERS_DIR / f"x_scaler_{modality_slug}.joblib"
-    y_scaler_path = SCALERS_DIR / f"y_scaler_{modality_slug}.joblib"
-    history_plot = PLOTS_DIR / f"history_{modality_slug}.png"
-    pred_plot = PLOTS_DIR / f"prediction_{modality_slug}.png"
+    x_neural_networks_outputs/scaler_path = NEURAL_NETWORKS_OUTPUTS/SCALERS_DIR / f"x_neural_networks_outputs/scaler_{modality_slug}.joblib"
+    y_neural_networks_outputs/scaler_path = NEURAL_NETWORKS_OUTPUTS/SCALERS_DIR / f"y_neural_networks_outputs/scaler_{modality_slug}.joblib"
+    history_plot = NEURAL_NETWORKS_OUTPUTS/PLOTS_DIR / f"history_{modality_slug}.png"
+    pred_plot = NEURAL_NETWORKS_OUTPUTS/PLOTS_DIR / f"prediction_{modality_slug}.png"
     metrics_path = OUTPUT_DIR / f"metrics_{modality_slug}.json"
 
     model.save(model_path)
-    joblib.dump(x_scaler, x_scaler_path)
-    joblib.dump(y_scaler, y_scaler_path)
+    joblib.dump(x_neural_networks_outputs/scaler, x_neural_networks_outputs/scaler_path)
+    joblib.dump(y_neural_networks_outputs/scaler, y_neural_networks_outputs/scaler_path)
     save_history_plot(history, f"{modality_name} - training history", history_plot)
     save_prediction_plot(y_true, y_pred, f"{modality_name} - test predictions", pred_plot)
 
@@ -343,8 +343,8 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    SCALERS_DIR.mkdir(parents=True, exist_ok=True)
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    NEURAL_NETWORKS_OUTPUTS/SCALERS_DIR.mkdir(parents=True, exist_ok=True)
+    NEURAL_NETWORKS_OUTPUTS/PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = load_dataset(DATA_PATH, sheet_name=SHEET_NAME)
 

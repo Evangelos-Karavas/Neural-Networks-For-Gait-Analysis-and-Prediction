@@ -43,10 +43,10 @@ CP_FOLDER    = "Data_CP/"
 CP_SHEET     = "Data"
 CP_SKIPROWS  = [1, 2]
 
-SAVE_DIR   = "Saved_Models"
-PRED_DIR   = "Predictions"
-SCALER_DIR = "Scaler"
-PLOT_DIR   = "Plots"
+SAVE_DIR   = "Neural_Networks_Output/Saved_Models"
+PRED_DIR   = "Neural_Networks_Output/Predictions"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
+PLOT_DIR   = "Neural_Networks_Output/Plots"
 
 # 18 columns: 6 joints × 3 planes
 ANGLE_COLS = [
@@ -537,8 +537,11 @@ def main():
             "set TYPICAL_FILE = 'Data_Normal/randomized_data_healthy.xlsx'."
         )
 
+    # PhaseVariable_Left/Right and the right-leg half-stride shift are already
+    # baked into TYPICAL_FILE by the data augmentation step
+    # (Data_Augmentation/data_randomize_kinetics.py).
     typ_df = pd.read_excel(TYPICAL_FILE).copy()
-    needed = set(ANGLE_COLS + [LFO_COL, RFO_COL])
+    needed = set(ANGLE_COLS + PV_COLS)
     missing = needed.difference(typ_df.columns)
     if missing:
         raise KeyError(
@@ -546,16 +549,13 @@ def main():
             "Try TYPICAL_FILE = 'Data_Normal/randomized_data_healthy.xlsx'."
         )
 
-    typ_df = typ_df[ANGLE_COLS + [LFO_COL, RFO_COL]].fillna(0)
-    typ_df = compute_phase_variables(typ_df, STRIDE_LEN, LHIP_COL, RHIP_COL, LFO_COL, RFO_COL)
+    typ_df = typ_df[ANGLE_COLS + PV_COLS].fillna(0)
 
-    # Drop rows where PV computation produced NaN (degenerate strides in augmented data)
+    # Drop rows where PV computation produced NaN (degenerate strides in source data)
     n_bad = typ_df[PV_COLS].isna().any(axis=1).sum()
     if n_bad > 0:
         print(f"[WARN] Dropping {n_bad} rows with NaN PV from typical data")
         typ_df = typ_df.dropna(subset=PV_COLS).reset_index(drop=True)
-
-    typ_df = apply_right_leg_half_stride_offset(typ_df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
     plot_pv_sanity(typ_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="Typical")
 

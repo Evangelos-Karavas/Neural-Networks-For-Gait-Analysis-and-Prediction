@@ -74,10 +74,10 @@ ROLL_H = 250        # rollout horizon
 ROLL_START_STRIDE = 10  # stride-aligned start (start_i = stride * 51)
 
 # Output folders/files
-SAVE_DIR = "Saved_Models"
-SCALER_DIR = "Scaler"
-PRED_DIR = "Predictions"
-PLOT_DIR = "Plots"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
+PRED_DIR = "Neural_Networks_Output/Predictions"
+PLOT_DIR = "Neural_Networks_Output/Plots"
 
 MODEL_OUT = os.path.join(SAVE_DIR, "Timestamp_cnn_model.keras")
 SCALER_OUT = os.path.join(SCALER_DIR, "standard_scaler_typical_cnn.save")
@@ -335,9 +335,9 @@ def main():
     if not os.path.exists(TYPICAL_XLSX):
         raise FileNotFoundError(f"Typical file not found: {TYPICAL_XLSX}")
 
+    # Right-leg half-stride shift is already baked into TYPICAL_XLSX by the
+    # data augmentation step (Data_Augmentation/data_randomize_kinematics.py).
     df_typ = pd.read_excel(TYPICAL_XLSX, usecols=COLUMNS).fillna(0)
-    if RIGHT_LEG_SHIFT != 0:
-        df_typ = stridewise_roll_right_leg(df_typ, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
     # ----------------------------
     # Load CP (concat)
     # ----------------------------
