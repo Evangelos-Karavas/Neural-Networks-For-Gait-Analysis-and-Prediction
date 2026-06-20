@@ -3,3 +3,7 @@ venv/
 .vscode
 __pycache__/
 *.pyc
+Neural_Networks_Output/Plots/
+Neural_Networks_Output/Plots_Comparison/
+Neural_Networks_Output/Predictions/
+Neural_Networks_Output/Saved_Models/
