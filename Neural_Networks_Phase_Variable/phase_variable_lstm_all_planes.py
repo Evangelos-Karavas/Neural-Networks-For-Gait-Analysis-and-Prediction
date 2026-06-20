@@ -561,7 +561,7 @@ def main():
 
     plot_pv_sanity(typ_df, stride_len=STRIDE_LEN, n_strides=3, title_prefix="Typical")
 
-    # ── Load CP (subject-level split: train/val/test by file, not by row) ──
+    # ── Load CP (subject-level split: group by real patient ID, not by file) ──
     if not os.path.isdir(CP_FOLDER):
         raise FileNotFoundError(f"CP folder not found: {CP_FOLDER}")
 
@@ -569,12 +569,28 @@ def main():
     if not cp_files:
         raise RuntimeError("No CP files found.")
 
+    # Each patient contributes ~5 trial files (e.g. "36686-20240711-1-05-01.xlsx").
+    # Split by patient ID so all of one patient's trials land in the same split.
+    subj_to_files = {}
+    for fn in cp_files:
+        subj_to_files.setdefault(fn.split("-")[0], []).append(fn)
+    subj_ids = sorted(subj_to_files.keys())
+
     rng = np.random.RandomState(42)
-    perm = rng.permutation(len(cp_files))
-    n_train = int(0.70 * len(cp_files))
-    n_val   = int(0.15 * len(cp_files))
-    train_idx = set(perm[:n_train])
-    val_idx   = set(perm[n_train:n_train + n_val])
+    perm = rng.permutation(len(subj_ids))
+    n_train = int(0.70 * len(subj_ids))
+    n_val   = int(0.15 * len(subj_ids))
+    train_subj = {subj_ids[i] for i in perm[:n_train]}
+    val_subj   = {subj_ids[i] for i in perm[n_train:n_train + n_val]}
+    # remaining subjects go to test
+
+    train_idx, val_idx = set(), set()
+    for i, fn in enumerate(cp_files):
+        sid = fn.split("-")[0]
+        if sid in train_subj:
+            train_idx.add(i)
+        elif sid in val_subj:
+            val_idx.add(i)
     # remaining indices go to test
 
     cp_train_frames, cp_val_frames, cp_test_frames = [], [], []

@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D, Reshape
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -49,6 +49,7 @@ tf_keras.__version__ = __version__
 # =============================================================================
 WINDOW = 51
 STRIDE_LEN = 51
+HORIZON = 10  # train on next 10 ticks directly, instead of just 1
 
 # 18 columns: 6 joints (L/R hip,knee,ankle) x 3 planes (1,2,3)
 COLUMNS = [
@@ -182,7 +183,8 @@ def stridewise_roll_right_leg(df: pd.DataFrame, stride_len: int, delay: int, rig
     return df2
 
 def load_cp_split(cp_folder: str, max_files: int, train_frac: float = 0.70, val_frac: float = 0.15, seed: int = 42):
-    """Subject-level (file-level) CP split so train/val/test never share a trial."""
+    """Subject-level CP split: group by real patient ID (~5 trial files each) so
+    train/val/test never share a patient."""
     if not os.path.isdir(cp_folder):
         raise FileNotFoundError(f"CP folder not found: {cp_folder}")
 
@@ -190,12 +192,25 @@ def load_cp_split(cp_folder: str, max_files: int, train_frac: float = 0.70, val_
     if not cp_files:
         raise RuntimeError("No CP files found.")
 
+    subj_to_files = {}
+    for fn in cp_files:
+        subj_to_files.setdefault(fn.split("-")[0], []).append(fn)
+    subj_ids = sorted(subj_to_files.keys())
+
     rng = np.random.RandomState(seed)
-    perm = rng.permutation(len(cp_files))
-    n_train = int(train_frac * len(cp_files))
-    n_val   = int(val_frac * len(cp_files))
-    train_idx = set(perm[:n_train])
-    val_idx   = set(perm[n_train:n_train + n_val])
+    perm = rng.permutation(len(subj_ids))
+    n_train = int(train_frac * len(subj_ids))
+    n_val   = int(val_frac * len(subj_ids))
+    train_subj = {subj_ids[i] for i in perm[:n_train]}
+    val_subj   = {subj_ids[i] for i in perm[n_train:n_train + n_val]}
+
+    train_idx, val_idx = set(), set()
+    for i, fn in enumerate(cp_files):
+        sid = fn.split("-")[0]
+        if sid in train_subj:
+            train_idx.add(i)
+        elif sid in val_subj:
+            val_idx.add(i)
 
     train_frames, val_frames, test_frames = [], [], []
     for i, fn in enumerate(cp_files):
@@ -238,6 +253,28 @@ def make_rolling_next_tick_pairs(series_TxD: np.ndarray, window: int = 51):
         X[i] = series_TxD[i:i+window]
         y[i] = series_TxD[i+window]
     return X, y
+
+def make_rolling_multistep_pairs(series_TxD: np.ndarray, window: int = 51, horizon: int = HORIZON):
+    """
+    series_TxD: (T,D) scaled
+    X:       (N, window, D)        input window
+    y_one:   (N, D)                target at t+window        (single next tick, for eval/plots)
+    y_multi: (N, horizon, D)       targets at t+window..t+window+horizon-1 (training supervision)
+    """
+    series_TxD = np.asarray(series_TxD)
+    T, D = series_TxD.shape
+    N = T - window - horizon + 1
+    if N <= 0:
+        raise ValueError(f"Not enough timesteps: T={T} for window={window}, horizon={horizon}")
+
+    X       = np.zeros((N, window, D), dtype=np.float32)
+    y_one   = np.zeros((N, D), dtype=np.float32)
+    y_multi = np.zeros((N, horizon, D), dtype=np.float32)
+    for i in range(N):
+        X[i]       = series_TxD[i:i + window]
+        y_one[i]   = series_TxD[i + window]
+        y_multi[i] = series_TxD[i + window:i + window + horizon]
+    return X, y_one, y_multi
 
 def print_metrics_deg(gt_deg_2d, pred_deg_2d, name, columns):
     gt = np.asarray(gt_deg_2d)
@@ -357,7 +394,8 @@ def rollout_next_tick(model, X_full, y_full, start_i, horizon):
     gts   = np.zeros((horizon, D), dtype=np.float32)
 
     for h in range(horizon):
-        yhat = model.predict(window.reshape(1, WINDOW, D), verbose=0)[0]  # (D,)
+        yhat_multi = model.predict(window.reshape(1, WINDOW, D), verbose=0)[0]  # (HORIZON, D)
+        yhat = yhat_multi[0]  # use only the immediate next-tick prediction to advance the rollout
         preds[h] = yhat
         gts[h]   = y_full[start_i + h]
         window = np.vstack([window[1:], yhat])
@@ -368,7 +406,7 @@ def rollout_next_tick(model, X_full, y_full, start_i, horizon):
 # =============================================================================
 # Build CNN model (51x18 -> 18)
 # =============================================================================
-def build_timestamp_cnn_next_tick(window=51, n_features=18, dropout=0.2):
+def build_timestamp_cnn_next_tick(window=51, n_features=18, dropout=0.2, horizon=HORIZON):
     model = Sequential([
         # Block 1: 32 -> 48 -> pool
         ZeroPadding1D(padding=2, input_shape=(window, n_features)),
@@ -389,7 +427,8 @@ def build_timestamp_cnn_next_tick(window=51, n_features=18, dropout=0.2):
         Flatten(),
         Dense(256, activation="relu"),
         Dropout(dropout),
-        Dense(n_features, activation="linear"),
+        Dense(horizon * n_features, activation="linear"),
+        Reshape((horizon, n_features)),
     ])
 
     model.compile(
@@ -447,46 +486,48 @@ def main():
     print(f"Saved scaler to: {SCALER_OUT}")
 
     # ----------------------------
-    # Build rolling next-tick datasets (per split, so windows never cross a split boundary)
+    # Build rolling datasets (per split, so windows never cross a split boundary)
+    # y_*       : single next-tick target  (used for eval/plots, unchanged downstream)
+    # y_*_multi : next HORIZON ticks       (used as the training supervision signal)
     # ----------------------------
-    X_typ,      y_typ      = make_rolling_next_tick_pairs(typ_scaled,      window=WINDOW)
-    X_cp_train, y_cp_train = make_rolling_next_tick_pairs(cp_train_scaled, window=WINDOW)
-    X_cp_val,   y_cp_val   = make_rolling_next_tick_pairs(cp_val_scaled,   window=WINDOW)
-    X_cp,       y_cp       = make_rolling_next_tick_pairs(cp_scaled,       window=WINDOW)
+    X_typ,      y_typ,      y_typ_multi      = make_rolling_multistep_pairs(typ_scaled,      window=WINDOW, horizon=HORIZON)
+    X_cp_train, y_cp_train, y_cp_train_multi = make_rolling_multistep_pairs(cp_train_scaled, window=WINDOW, horizon=HORIZON)
+    X_cp_val,   y_cp_val,   y_cp_val_multi   = make_rolling_multistep_pairs(cp_val_scaled,   window=WINDOW, horizon=HORIZON)
+    X_cp,       y_cp,       y_cp_multi       = make_rolling_multistep_pairs(cp_scaled,       window=WINDOW, horizon=HORIZON)
 
     # Split typical for train/val
     n_typ = len(X_typ)
     val_n_typ = max(1, int(0.2 * n_typ))
-    X_val_typ, y_val_typ = X_typ[:val_n_typ], y_typ[:val_n_typ]
+    X_val_typ, y_val_typ_multi = X_typ[:val_n_typ], y_typ_multi[:val_n_typ]
 
-    X_train = np.vstack([X_typ[val_n_typ:], X_cp_train])
-    y_train = np.vstack([y_typ[val_n_typ:], y_cp_train])
+    X_train      = np.vstack([X_typ[val_n_typ:], X_cp_train])
+    y_train_multi = np.vstack([y_typ_multi[val_n_typ:], y_cp_train_multi])
 
-    X_val = np.vstack([X_val_typ, X_cp_val])
-    y_val = np.vstack([y_val_typ, y_cp_val])
+    X_val      = np.vstack([X_val_typ, X_cp_val])
+    y_val_multi = np.vstack([y_val_typ_multi, y_cp_val_multi])
 
     # Test on held-out CP subjects only
-    X_test, y_test = X_cp, y_cp
+    X_test, y_test, y_test_multi = X_cp, y_cp, y_cp_multi
 
     print(f"Typical rolling samples: {len(X_typ)}")
     print(f"CP rolling samples (train/val/test): {len(X_cp_train)}/{len(X_cp_val)}/{len(X_cp)}")
     print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test(CP): {len(X_test)}")
-    print(f"Feature dims: {N_FEATURES} (inputs) -> {N_FEATURES} (outputs)")
+    print(f"Feature dims: {N_FEATURES} (inputs) -> {N_FEATURES} (outputs) x {HORIZON} steps")
 
     # ----------------------------
     # Build + train CNN
     # ----------------------------
-    model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT)
+    model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT, horizon=HORIZON)
     model.summary()
 
     es_cb = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
     lr_cb = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
 
     history = model.fit(
-        X_train, y_train,
+        X_train, y_train_multi,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        validation_data=(X_val, y_val),
+        validation_data=(X_val, y_val_multi),
         callbacks=[es_cb, lr_cb],
         verbose=1
     )
@@ -495,9 +536,9 @@ def main():
     # Evaluate (scaled metrics)
     # ----------------------------
     print("\n=== Evaluate (scaled space) ===")
-    tr = model.evaluate(X_train, y_train, verbose=0)
-    va = model.evaluate(X_val, y_val, verbose=0)
-    te = model.evaluate(X_test, y_test, verbose=0)
+    tr = model.evaluate(X_train, y_train_multi, verbose=0)
+    va = model.evaluate(X_val, y_val_multi, verbose=0)
+    te = model.evaluate(X_test, y_test_multi, verbose=0)
     print(f"Train: loss={tr[0]:.6f}  MAE={tr[1]:.6f}  RMSE={tr[2]:.6f}")
     print(f"Val:   loss={va[0]:.6f}  MAE={va[1]:.6f}  RMSE={va[2]:.6f}")
     print(f"Test:  loss={te[0]:.6f}  MAE={te[1]:.6f}  RMSE={te[2]:.6f}")
@@ -515,7 +556,7 @@ def main():
     X_seg = X_test[start:start+T_plot]
     y_seg = y_test[start:start+T_plot]
 
-    pred_seg_scaled = model.predict(X_seg, verbose=0)  # (T,18)
+    pred_seg_scaled = model.predict(X_seg, verbose=0)[:, 0, :]  # (T,18); take immediate next-tick step
 
     gt_seg_deg   = scaler.inverse_transform(y_seg)
     pred_seg_deg = scaler.inverse_transform(pred_seg_scaled)
@@ -549,7 +590,7 @@ def main():
 
     # X_cp[i] corresponds to cp_scaled[i:i+51], y_cp[i] = cp_scaled[i+51]
     i = int(np.clip(a, 0, len(X_cp) - 1))
-    pred_one_scaled = model.predict(X_cp[i:i+1], verbose=0)[0]  # (18,)
+    pred_one_scaled = model.predict(X_cp[i:i+1], verbose=0)[0, 0, :]  # (18,); take immediate next-tick step
     pred_one_deg = scaler.inverse_transform(pred_one_scaled.reshape(1, -1))[0]
 
     plot_one_stride_one_step_18(
