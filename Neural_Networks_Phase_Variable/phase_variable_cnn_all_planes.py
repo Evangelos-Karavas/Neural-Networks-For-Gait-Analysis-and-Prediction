@@ -698,7 +698,7 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
-        callbacks=[dtw_cb, es_cb, lr_cb],
+        callbacks=[dtw_cb, lr_cb],
         verbose=1,
     )
 

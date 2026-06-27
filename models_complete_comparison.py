@@ -46,9 +46,21 @@ CP_SKIPROWS = [1, 2]
 MAX_CP_FILES = 500
 TRAIN_FRAC, VAL_FRAC, SPLIT_SEED = 0.70, 0.15, 42
 
+# Per-subject healthy trial files live alongside the bulk training file
+# (Data_Normal/dynamics_total_augmented.xlsx) used to train the typical-gait
+# branch of every model; these per-subject files share the CP files' sheet
+# layout, so they're read the same way. NOT a held-out set -- every one of
+# these subjects' strides was part of the typical-gait training data.
+NORMAL_FOLDER = "Data_Normal/"
+NORMAL_EXCLUDE_FILES = {
+    "dynamics_total_augmented.xlsx",
+    "randomized_data_healthy.xlsx",
+    "Healthy_Data_1_Person.xlsx",
+}
+
 SAVE_DIR = "Neural_Networks_Output/Saved_Models"
 SCALER_DIR = "Neural_Networks_Output/Scaler"
-PLOT_DIR = "Neural_Networks_Output/Plots_Comparison"
+PLOT_DIR = "Neural_Networks_Output/Subjects/SUBJECT_5"
 
 ANGLE_COLS = [
     "LHipAngles (1)", "LHipAngles (2)", "LHipAngles (3)",
@@ -202,11 +214,11 @@ def mean_toe_off(df: pd.DataFrame):
     return _m(LFO_COL), _m(RFO_COL)
 
 
-def load_cp_subject(files) -> pd.DataFrame:
-    """Concatenate one patient's trial files (each a single 51-row stride)."""
+def load_subject_trials(files, folder: str) -> pd.DataFrame:
+    """Concatenate one subject's trial files (each a single 51-row stride)."""
     frames = []
     for fn in files:
-        fp = os.path.join(CP_FOLDER, fn)
+        fp = os.path.join(folder, fn)
         df = pd.read_excel(
             fp, sheet_name=CP_SHEET,
             usecols=ANGLE_COLS + [LFO_COL, RFO_COL],
@@ -214,6 +226,28 @@ def load_cp_subject(files) -> pd.DataFrame:
         ).fillna(0)
         frames.append(df)
     return pd.concat(frames, ignore_index=True)
+
+
+def load_cp_subject(files) -> pd.DataFrame:
+    return load_subject_trials(files, CP_FOLDER)
+
+
+def load_healthy_subject(files) -> pd.DataFrame:
+    return load_subject_trials(files, NORMAL_FOLDER)
+
+
+def get_healthy_subjects():
+    """Returns {subject_id: [trial files...]} for every per-subject healthy
+    trial file in Data_Normal/ (excludes the bulk training/augmentation
+    files). Mirrors get_cp_test_subjects() but is NOT a held-out split."""
+    files = [
+        fn for fn in sorted(os.listdir(NORMAL_FOLDER))
+        if fn.endswith(".xlsx") and fn not in NORMAL_EXCLUDE_FILES
+    ]
+    subj_to_files = {}
+    for fn in files:
+        subj_to_files.setdefault(fn.split("-")[0], []).append(fn)
+    return subj_to_files
 
 
 # ============================================================
@@ -234,13 +268,13 @@ def load_all_models():
         kind="timestamp",
     )
     models["pv_cnn"] = dict(
-        model=load_model(os.path.join(SAVE_DIR, "PV_cnn_best_rollout_dtw_18ch.keras")),
+        model=load_model(os.path.join(SAVE_DIR, "PV_cnn_next_tick_18ch_final.keras")),
         scaler_pv=joblib.load(os.path.join(SCALER_DIR, "scaler_pv_cnn_18ch.save")),
         scaler_ang=joblib.load(os.path.join(SCALER_DIR, "scaler_angles_cnn_18ch.save")),
         kind="pv",
     )
     models["pv_lstm"] = dict(
-        model=load_model(os.path.join(SAVE_DIR, "PV_lstm_best_rollout_dtw_18ch.keras")),
+        model=load_model(os.path.join(SAVE_DIR, "PV_lstm_next_tick_18ch_final.keras")),
         scaler_pv=joblib.load(os.path.join(SCALER_DIR, "scaler_pv_lstm_18ch.save")),
         scaler_ang=joblib.load(os.path.join(SCALER_DIR, "scaler_angles_lstm_18ch.save")),
         kind="pv",
@@ -255,9 +289,9 @@ def predict_next_tick(model_entry, df_subject: pd.DataFrame):
     returns (pred_deg, gt_deg) both (N,18), or (None, None) if too short.
     """
     df = df_subject.copy()
-    df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
     if model_entry["kind"] == "timestamp":
+        df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS)
         scaler = model_entry["scaler"]
         ang_sc = scaler.transform(df[ANGLE_COLS].to_numpy()).astype(np.float32)
         X, y = make_rolling_windows(ang_sc, ang_sc, WINDOW)
@@ -272,6 +306,9 @@ def predict_next_tick(model_entry, df_subject: pd.DataFrame):
         return pred_deg, gt_deg
 
     else:  # PV models
+        # PV must be computed on the raw, unshifted data (anchored to the
+        # start of each stride) before the right leg is shifted -- same
+        # order as the *_all_planes.py training scripts.
         df = compute_phase_variables(df, STRIDE_LEN)
         df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS, pv_right_col="PhaseVariable_Right")
         scaler_pv, scaler_ang = model_entry["scaler_pv"], model_entry["scaler_ang"]
@@ -299,6 +336,21 @@ def compute_metrics_deg(pred: np.ndarray, gt: np.ndarray):
     ss_tot = np.sum((gt - gt.mean(axis=0)) ** 2, axis=0) + eps
     r2 = 1.0 - ss_res / ss_tot
     return mae, rmse, r2
+
+
+def overall_stats_text(preds: dict, gt_ref: np.ndarray, chans) -> str:
+    """One line per model: overall MAE/RMSE/R2 averaged over `chans`,
+    computed on the full (unsegmented) prediction vs ground truth."""
+    lines = ["Overall (this subject):"]
+    for name in MODEL_NAMES:
+        pred = preds.get(name)
+        if pred is None:
+            continue
+        n = min(len(pred), len(gt_ref))
+        mae, rmse, r2 = compute_metrics_deg(pred[:n][:, chans], gt_ref[:n][:, chans])
+        lines.append(f"{MODEL_LABELS[name]:<15s} MAE={mae.mean():5.2f}  "
+                     f"RMSE={rmse.mean():5.2f}  R2={r2.mean():5.2f}")
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -600,6 +652,11 @@ def plot_normalized_cycle_with_phases(preds: dict, gt_ref: np.ndarray,
                                   lw=1.6, ls="--", zorder=4)
                     if row == 0 and col == 0:
                         line_handles.append(hl); line_labels.append(MODEL_LABELS[name])
+        chans = [_channel_index(side, r, c) for r in range(3) for c in range(3)]
+        stats_text = overall_stats_text(preds, gt_ref, chans)
+        fig.text(0.99, 0.965, stats_text, ha="right", va="top", fontsize=8,
+                 family="monospace",
+                 bbox=dict(boxstyle="round", fc="white", ec="#888888", alpha=0.85))
         save_path = (os.path.join(save_dir,
                      f"cycle_phases_{side.lower()}_subject_{subject_name}.png")
                      if save_dir else None)
@@ -870,8 +927,10 @@ def main():
     parser = argparse.ArgumentParser(description="Compare 4 all-planes models across multiple held-out CP subjects")
     parser.add_argument("--demo", action="store_true", help="Render synthetic preview plots (no models/data needed) and exit")
     parser.add_argument("--list-subjects", action="store_true", help="List held-out CP test files with their index and exit")
-    parser.add_argument("--subject", type=int, default=None, help="Index (from --list-subjects) of one subject to inspect")
-    parser.add_argument("--plot", action="store_true", help="Show plots for the chosen --subject")
+    parser.add_argument("--subject", type=int, default=None, help="Index (from --list-subjects) of one CP subject to inspect")
+    parser.add_argument("--list-healthy-subjects", action="store_true", help="List healthy (Data_Normal) subjects with their index and exit")
+    parser.add_argument("--healthy_subject", type=int, default=0, help="Index (from --list-healthy-subjects) of the healthy subject to compare against. NOTE: these subjects were part of typical-gait training data, not a held-out set.")
+    parser.add_argument("--plot", action="store_true", help="Show the complete-stride plots for the chosen --subject (CP) and --healthy_subject")
     parser.add_argument("--no_save", action="store_true", help="Don't save PNGs when plotting")
     args = parser.parse_args()
 
@@ -886,6 +945,16 @@ def main():
         for i, sid in enumerate(subject_ids):
             print(f"[{i:3d}] {sid}  ({len(test_subjects[sid])} trials)")
         print(f"\n{len(subject_ids)} held-out CP test subjects.")
+        return
+
+    healthy_subjects = get_healthy_subjects()
+    healthy_ids = list(healthy_subjects.keys())
+
+    if args.list_healthy_subjects:
+        for i, sid in enumerate(healthy_ids):
+            print(f"[{i:3d}] {sid}  ({len(healthy_subjects[sid])} trials)")
+        print(f"\n{len(healthy_ids)} healthy subjects "
+              f"(NOTE: part of typical-gait training data, not held out).")
         return
 
     os.makedirs(PLOT_DIR, exist_ok=True)
@@ -939,6 +1008,25 @@ def main():
         make_all_phase_plots(
             last_preds, last_gt, subject_name,
             toe_off_left=to_left, toe_off_right=to_right,
+            save_dir=save_dir, show=not args.no_save,
+        )
+
+    if args.plot and healthy_ids:
+        hsid = healthy_ids[args.healthy_subject]
+        print(f"\nHealthy subject: {hsid} "
+              f"(NOTE: part of typical-gait training data, not held out)")
+        df_healthy = load_healthy_subject(healthy_subjects[hsid])
+        h_preds, h_gt = {}, None
+        for name in MODEL_NAMES:
+            pred_deg, gt_deg = predict_next_tick(models[name], df_healthy)
+            h_preds[name] = pred_deg
+            if h_gt is None and gt_deg is not None:
+                h_gt = gt_deg
+        to_left_h, to_right_h = mean_toe_off(df_healthy)
+        print(f"Measured toe-off: Left {to_left_h:.1f}%  Right {to_right_h:.1f}%")
+        plot_normalized_cycle_with_phases(
+            h_preds, h_gt, f"Healthy_{hsid}",
+            toe_off_left=to_left_h, toe_off_right=to_right_h,
             save_dir=save_dir, show=not args.no_save,
         )
 

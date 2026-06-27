@@ -36,7 +36,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, ZeroPadding1D, Reshape
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import ReduceLROnPlateau
 
 # --- Keras save-model version workaround (same pattern you used)
 import tensorflow.python.keras as tf_keras
@@ -454,9 +454,10 @@ def main():
     if not os.path.exists(TYPICAL_XLSX):
         raise FileNotFoundError(f"Typical file not found: {TYPICAL_XLSX}")
 
+    # The right-leg half-stride shift is already baked into TYPICAL_XLSX by the
+    # data augmentation step (Data_Augmentation/data_randomize_kinetics.py);
+    # re-applying it here would double-shift the right leg.
     df_typ = pd.read_excel(TYPICAL_XLSX, usecols=COLUMNS).fillna(0)
-    if RIGHT_LEG_SHIFT != 0:
-        df_typ = stridewise_roll_right_leg(df_typ, STRIDE_LEN, RIGHT_LEG_SHIFT, RIGHT_LEG_COLS)
 
     # ----------------------------
     # Load CP (subject-level split: train/val/test by file, not by row)
@@ -520,7 +521,6 @@ def main():
     model = build_timestamp_cnn_next_tick(window=WINDOW, n_features=N_FEATURES, dropout=DROPOUT, horizon=HORIZON)
     model.summary()
 
-    es_cb = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
     lr_cb = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
 
     history = model.fit(
@@ -528,7 +528,7 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val_multi),
-        callbacks=[ lr_cb],
+        callbacks=[lr_cb],
         verbose=1
     )
 

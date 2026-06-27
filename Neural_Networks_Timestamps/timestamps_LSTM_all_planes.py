@@ -11,7 +11,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import RootMeanSquaredError
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import ReduceLROnPlateau
 
 
 # ============================================================
@@ -419,7 +419,6 @@ def main():
     model = build_model(input_dim=N_FEATURES, window=WINDOW, output_dim=N_FEATURES)
     model.summary()
 
-    es_cb = EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
     lr_cb = ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
 
     history = model.fit(
@@ -427,7 +426,7 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val),
-        callbacks=[ lr_cb],
+        callbacks=[lr_cb],
         verbose=1
     )
 
