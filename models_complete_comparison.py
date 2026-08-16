@@ -19,9 +19,9 @@ It then reports:
     subject across all 4 models
 
 Run from project root:
-  python models_comparison_all_planes.py --list-subjects
-  python models_comparison_all_planes.py                      # table over all held-out subjects
-  python models_comparison_all_planes.py --subject 3 --plot    # plots for one subject
+  python models_complete_comparison.py --list-subjects
+  python models_complete_comparison.py                      # table over all held-out subjects
+  python models_complete_comparison.py --subject 3 --plot    # plots for one subject
 """
 
 import argparse
@@ -202,15 +202,31 @@ def get_cp_test_subjects():
     return {sid: subj_to_files[sid] for sid in test_subj}
 
 
-def mean_toe_off(df: pd.DataFrame):
+def mean_toe_off(df: pd.DataFrame, stride_len: int = STRIDE_LEN):
     """Mean measured toe-off (% of stride) per side, from the Foot Off columns.
-    These anchor the gait-phase shading to this subject's own data. Falls back
-    to the textbook 60% if the columns are missing or empty."""
+    These anchor the gait-phase shading to this subject's own data.
+
+    The Foot-Off percentage is recorded once per trial, on the first row of the
+    stride; every other row is empty and gets zero-filled at load time. A plain
+    column mean is therefore dominated by those zeros (~1.2 for a 5-trial
+    subject), falls outside the sanity range, and silently returns the 60%
+    default for every subject. Sample the value at each stride start instead --
+    the same rows compute_phase_variables() reads. Falls back to the textbook
+    60% only if no valid value is found."""
+    n_strides = max(1, len(df) // stride_len)
+
     def _m(col, default=60.0):
-        if col in df.columns and df[col].notna().any():
-            v = float(df[col].mean())
-            return v if 5.0 <= v <= 95.0 else default
-        return default
+        if col not in df.columns:
+            return default
+        vals = []
+        for s in range(n_strides):
+            i = s * stride_len
+            if i < len(df):
+                v = float(df[col].iloc[i])
+                if 5.0 <= v <= 95.0:
+                    vals.append(v)
+        return float(np.mean(vals)) if vals else default
+
     return _m(LFO_COL), _m(RFO_COL)
 
 
