@@ -29,7 +29,12 @@ MODEL_MACROS = {
 
 
 def bold(text: str, flag: bool) -> str:
-    return r"\textbf{" + text + "}" if flag else text
+    if not flag:
+        return text
+    # \textbf{} does not affect math mode, so bold the inside instead.
+    if text.startswith("$") and text.endswith("$"):
+        return r"$\mathbf{" + text[1:-1] + "}$"
+    return r"\textbf{" + text + "}"
 
 
 def table_per_joint(channel_df: pd.DataFrame, order: list[str]) -> str:

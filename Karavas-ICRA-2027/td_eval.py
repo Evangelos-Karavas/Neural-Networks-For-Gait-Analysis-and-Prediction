@@ -28,6 +28,7 @@ from td_pipeline import (
     CHANNEL_LABELS,
     HORIZON,
     N_ANGLES,
+    PV_COLS,
     SAGITTAL_IDX,
     SAGITTAL_LABELS,
     STRIDE_LEN,
@@ -248,6 +249,36 @@ def phase_lag_samples(pred: np.ndarray, gt: np.ndarray, channel: int = 0,
 # ============================================================
 # Figures
 # ============================================================
+def plot_pv_strides(frame: pd.DataFrame, path: Path, n_strides: int = 5) -> None:
+    """Left and right phase variable over consecutive strides.
+
+    Sized for a narrow two-column subfigure: the figure is drawn at roughly the
+    width it is placed at, so the labels reach the page at the point size set
+    here instead of being shrunk to illegibility by LaTeX.
+    """
+    pv = frame[PV_COLS].to_numpy(float)[: n_strides * STRIDE_LEN]
+    t = np.arange(len(pv))
+
+    fig, ax = plt.subplots(figsize=(2.35, 1.30), dpi=400)
+    ax.plot(t, pv[:, 0], color=MODEL_COLORS["timestamp_lstm"], linewidth=1.1, label="Left")
+    ax.plot(t, pv[:, 1], color=MODEL_COLORS["pv_lstm"], linewidth=1.1, label="Right")
+
+    for boundary in range(STRIDE_LEN, len(pv), STRIDE_LEN):
+        ax.axvline(boundary, color=GRID_COLOR, linewidth=0.6, zorder=0)
+
+    ax.set_xlabel("Sample", fontsize=7, labelpad=1.5)
+    ax.set_ylabel("$s$", fontsize=8, labelpad=1.5)
+    ax.set_ylim(-0.05, 1.08)
+    ax.set_yticks([0, 0.5, 1.0])
+    ax.tick_params(labelsize=6, length=2, pad=1.5)
+    ax.legend(frameon=False, fontsize=6, loc="lower right", handlelength=1.2,
+              borderaxespad=0.2, handletextpad=0.4)
+    _style_axis(ax)
+    fig.tight_layout(pad=0.2)
+    fig.savefig(path, bbox_inches="tight", pad_inches=0.02)
+    plt.close(fig)
+
+
 def plot_td_variability(frames: dict[str, pd.DataFrame], path: Path) -> None:
     """Sagittal hip/knee/ankle over every TD stride in the dataset."""
     fig, axes = plt.subplots(2, 3, figsize=(10, 5), sharex=True)
@@ -278,8 +309,7 @@ def plot_td_variability(frames: dict[str, pd.DataFrame], path: Path) -> None:
                 ax.set_xlabel("Gait cycle (%)", fontsize=8)
 
     axes[0, 0].legend(frameon=False, fontsize=8)
-    fig.suptitle("Typically developed gait: all strides, all subjects (sagittal plane)",
-                 fontsize=11)
+    fig.suptitle("All strides, all subjects (sagittal plane)", fontsize=11)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -396,7 +426,7 @@ def plot_subject_scatter(summary: pd.DataFrame, path: Path,
     ax.set_xticklabels([model_labels[k] for k in keys], fontsize=9)
     ax.set_ylabel(metric + " (deg), one point per held-out subject", fontsize=9)
     _style_axis(ax)
-    ax.set_title("Teacher-forced " + metric + " on held-out TD subjects (black bar = mean)",
+    ax.set_title("Teacher-forced " + metric + " on held-out subjects (black bar = mean)",
                  fontsize=11)
     fig.tight_layout()
     fig.savefig(path, dpi=200)

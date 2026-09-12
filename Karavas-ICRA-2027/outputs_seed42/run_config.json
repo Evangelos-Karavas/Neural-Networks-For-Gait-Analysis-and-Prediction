@@ -1,0 +1,188 @@
+{
+  "subjects": [
+    "NV031",
+    "NV033",
+    "NV036",
+    "NV037",
+    "NV038",
+    "NV039",
+    "NV041",
+    "NV042",
+    "NV043",
+    "NV044",
+    "NV045",
+    "NV046"
+  ],
+  "strides_per_subject": {
+    "NV031": 5,
+    "NV033": 5,
+    "NV036": 5,
+    "NV037": 5,
+    "NV038": 5,
+    "NV039": 5,
+    "NV041": 5,
+    "NV042": 5,
+    "NV043": 5,
+    "NV044": 5,
+    "NV045": 5,
+    "NV046": 4
+  },
+  "splits": [
+    {
+      "repeat": 0,
+      "train": [
+        "NV031",
+        "NV033",
+        "NV038",
+        "NV039",
+        "NV041",
+        "NV042",
+        "NV043",
+        "NV046"
+      ],
+      "val": [
+        "NV036",
+        "NV037"
+      ],
+      "test": [
+        "NV044",
+        "NV045"
+      ]
+    },
+    {
+      "repeat": 1,
+      "train": [
+        "NV033",
+        "NV037",
+        "NV038",
+        "NV039",
+        "NV041",
+        "NV044",
+        "NV045",
+        "NV046"
+      ],
+      "val": [
+        "NV036",
+        "NV042"
+      ],
+      "test": [
+        "NV031",
+        "NV043"
+      ]
+    },
+    {
+      "repeat": 2,
+      "train": [
+        "NV033",
+        "NV037",
+        "NV041",
+        "NV042",
+        "NV043",
+        "NV044",
+        "NV045",
+        "NV046"
+      ],
+      "val": [
+        "NV031",
+        "NV038"
+      ],
+      "test": [
+        "NV036",
+        "NV039"
+      ]
+    },
+    {
+      "repeat": 3,
+      "train": [
+        "NV031",
+        "NV036",
+        "NV038",
+        "NV039",
+        "NV041",
+        "NV042",
+        "NV044",
+        "NV045"
+      ],
+      "val": [
+        "NV037",
+        "NV043"
+      ],
+      "test": [
+        "NV033",
+        "NV046"
+      ]
+    },
+    {
+      "repeat": 4,
+      "train": [
+        "NV031",
+        "NV033",
+        "NV037",
+        "NV039",
+        "NV043",
+        "NV044",
+        "NV045",
+        "NV046"
+      ],
+      "val": [
+        "NV036",
+        "NV041"
+      ],
+      "test": [
+        "NV038",
+        "NV042"
+      ]
+    },
+    {
+      "repeat": 5,
+      "train": [
+        "NV031",
+        "NV033",
+        "NV036",
+        "NV038",
+        "NV039",
+        "NV042",
+        "NV045",
+        "NV046"
+      ],
+      "val": [
+        "NV043",
+        "NV044"
+      ],
+      "test": [
+        "NV037",
+        "NV041"
+      ]
+    }
+  ],
+  "args": {
+    "repeats": 6,
+    "n_test": 2,
+    "n_val": 2,
+    "aug_rounds": 7,
+    "horizon": 10,
+    "rollout_strides": 6,
+    "seed": 42,
+    "batch_size": 256,
+    "epochs": null,
+    "models": [
+      "timestamp_lstm",
+      "pv_lstm",
+      "timestamp_cnn",
+      "pv_cnn"
+    ],
+    "output": "/home/vaggelis/Desktop/Karavas Exoskeleton/Neural-Networks-For-Gait-Analysis-and-Prediction/Karavas-ICRA-2027/outputs",
+    "quick": false,
+    "no_figures": false
+  },
+  "augmentation": {
+    "amplitude_range": [
+      0.9,
+      1.1
+    ],
+    "warp_strength": 0.06,
+    "noise_frac": 0.03,
+    "smooth_window": 9,
+    "smooth_polyorder": 3
+  }
+}

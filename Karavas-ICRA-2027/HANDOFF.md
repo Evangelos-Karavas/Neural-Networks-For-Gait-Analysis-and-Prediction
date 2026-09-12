@@ -12,13 +12,27 @@ what to run, and what still has to be written.
 checked against the official CFP:
 
 - **8 pages including references.** Over-length papers are *returned without
-  review*; there is no over-length fee.
+  review*; there is no over-length fee. The current PDF is exactly 8.
 - **Double-anonymous review.** No author names, affiliations or emails in the
   PDF. Already done in the `.tex` (real block kept commented out).
-- Optional video, ≤20 MB, ≤180 s, submitted *with* the initial submission or
-  never.
+- **AI-generated content must be disclosed in the acknowledgments**, naming the
+  system and the sections affected. Editing and grammar assistance is exempt and
+  needs no disclosure. Breaching this disqualifies the paper and the
+  registration fee is non-refundable. **This paper needs such a disclosure** —
+  §IV–VI, the abstract and the contributions paragraph were drafted with an AI
+  assistant (Claude) against the measured outputs. A disclosure is not
+  identifying, so it can go in the anonymous submission. Decide with the
+  supervisor before submitting; do not quietly skip it.
+- Video is optional, ≤20 MB, ≤180 s, mp4/mpeg/mpg, ≥480p, ≥20 fps. **Correction
+  to an earlier version of this file**: it is *not* "with the submission or
+  never". There are two windows — 2026-08-05 to 09-09 (closed) and **2026-09-17
+  to 09-22**, the second one *after* the paper deadline. Uploads are blocked
+  09-10 to 09-16. So a video is still possible, but only in that later window.
+- No online presentation option; a paper with no on-site presenter is skipped.
 
 The paper class (`ieeeconf.cls`) is already correct for ICRA.
+
+Source: the official CFP at `2027.ieee-icra.org`, checked 2026-09-12.
 
 ## 2. The story the paper must tell
 
@@ -43,7 +57,9 @@ Specific instructions:
 
 | Decision | Choice | Why |
 |---|---|---|
-| Evaluation protocol | Repeated random subject-level splits, 5 draws of 8 train / 2 val / 2 test | Only 12 subjects; a single split would make the result an accident of who was held out |
+| Evaluation protocol | **Partitioning** subject-level splits: 6 splits of 8 train / 2 val / 2 test, each subject held out **exactly once** | Only 12 subjects; a single split would make the result an accident of who was held out. Independent *random* draws were worse still — 5 draws of 2 covered only 8 of 12 subjects and tested two of them twice (fixed 2026-09-12) |
+| Missing data | Strides with any missing joint angle are **dropped, not filled** | `fillna(0.0)` fabricated 12 samples of a flat left leg at exactly 0°, which also corrupted that stride's phase variable. 59 strides now, not 60 (fixed 2026-09-12) |
+| Reproducibility | `tf.keras.utils.set_random_seed` per (split, model) | Weight init and dropout were unseeded, so published numbers could not be reproduced (fixed 2026-09-12) |
 | Augmentation | Regenerated per split from training subjects only | The pre-existing bulk files leak (see §5) |
 | Code layout | Shared pipeline module + thin runners, in this folder | The old code duplicated the same loader across 8 near-identical scripts |
 | Model scope | 18-channel (all three planes) only | Halves the training cost and still supports every evaluation |
@@ -127,46 +143,117 @@ held-out subjects reappear — noised — in training. The old paper's 2.1° LST
 figure came from that. **This pipeline never reads those files.** Honest
 cross-subject numbers are substantially worse, and that is correct.
 
-## 6. Results from the superseded H=1 run
+## 6. Results — the full H=10 run (2026-09-12, on Linux/GPU)
 
-Archived in `outputs_h1_superseded/`. The *conclusions* survived the horizon
-change, and a 3-split spot check at H=10 reproduced the key parity
-(PV CNN 4.24° vs Timestamp CNN 4.26°), so they are the best current guide to
-what the new run will show.
+Run in ~400 s on an RTX 5060 Ti. Everything below is in `outputs/`. The H=1 run
+in `outputs_h1_superseded/` is kept only as evidence for §5(a); **its model
+rankings are superseded and one of them is reversed** — see the warning below.
 
-**Teacher-forced accuracy: conditioning makes no difference.** Paired over 10
-held-out-subject evaluations: PV − Timestamp = **+0.16°** (LSTM, PV better on
-only 2/10) and **−0.03°** (CNN, 5/10). Backbone does matter: LSTM beat CNN by
-**0.86°** on 10/10.
+> **The run is now seeded.** `run_comparison.py` calls
+> `tf.keras.utils.set_random_seed` per (split, model) before building each
+> network, so rerunning reproduces these exact numbers. It did not before —
+> weight init and dropout were unseeded, and the first H=10 run could not be
+> reproduced. **The numbers below are from the seeded run and differ from that
+> first one** (see the seed-sensitivity note at the end of this section).
 
-**Recursive rollout over 6 strides: conditioning is decisive.** Hip phase lag,
-mean |lag| in samples (51 samples = one stride, so 1 sample ≈ 2% of the cycle):
+**Teacher-forced at 200 ms: a tie.** Paired over 10 held-out-subject
+evaluations, PV − Timestamp = **−0.04°** (LSTM) and **−0.02°** (CNN) — and the
+counts point the other way, with the *timestamp* variant better on 7/10 (LSTM)
+and 6/10 (CNN). All four models sit between 4.29° and 4.55°, a 0.26° spread
+inside a per-subject spread of 2.9–5.9°. Backbone: CNN beats LSTM by 0.25°
+(timestamp, 7/10) and 0.22° (PV, 8/10). Both baselines are comfortably beaten
+(persistence 8.55°, linear 13.97° — these are deterministic and unchanged), so
+§5(a) is satisfied at full scale.
 
-| Model | mean | median | within 1 sample |
-|---|---|---|---|
-| Timestamp LSTM | 5.10 | 5.0 | 1/10 |
-| **PV LSTM** | **0.70** | **0.5** | **8/10** |
-| Timestamp CNN | 2.00 | 1.0 | 6/10 |
-| PV CNN | 1.10 | 1.0 | 7/10 |
+**Recursive rollout over 6 strides: conditioning is what separates them.** Hip
+phase lag, mean |lag| in samples (51 samples = one stride):
 
-Paired: PV improves lag by **4.40 samples** (LSTM, better on 8/10) and **0.90**
-(CNN, 6/10); rollout MAE by **1.66°** (LSTM, 9/10) and **0.34°** (CNN, 7/10).
+| Model | mean | median | % of cycle | within 1 sample |
+|---|---|---|---|---|
+| Timestamp LSTM | 2.80 | 3.0 | 5.5% | 3/10 |
+| **PV LSTM** | **1.10** | **1.0** | **2.2%** | **8/10** |
+| Timestamp CNN | 2.20 | 2.0 | 4.3% | 4/10 |
+| PV CNN | 1.20 | 1.0 | 2.4% | 7/10 |
 
-**The argument to write**: phase conditioning costs nothing at short horizon and
-buys temporal stability at long horizon. The Timestamp LSTM drifts ~10% of a
-gait cycle out of phase; the PV LSTM stays within ~1%.
+Paired: PV improves |lag| by **1.70 samples** (LSTM, better on 7/10, 2 tied) and
+**1.00** (CNN, 6/10, 4 tied).
 
-One honest complication: under rollout the CNNs had *lower* MAE than the LSTMs
-(4.49–4.83 vs 6.04–7.70) even though LSTMs were better teacher-forced — a
-recurrent model compounds its own error through its hidden state, while a
-memoryless one reverts to an average waveform with bounded error. Do not hide
-this; the PV LSTM's claim is phase accuracy, not lowest rollout MAE.
+Rollout MAE: 5.53 / 5.55 / 5.10 / 4.77. Paired, PV improves it by **0.33°** for
+the CNN (7/10) but leaves the LSTM **unchanged** (+0.02°, 6/10) — so the phase
+benefit does *not* translate into lower rollout error for the recurrent
+backbone. The paper says this explicitly; do not quietly upgrade it.
+
+**The argument written into the paper**: phase conditioning costs nothing at
+short horizon and buys temporal stability at long horizon, in *both* backbones.
+
+### Two corrections to the old H=1 guidance
+
+**(a) The backbone ranking reversed.** At H=1 the LSTM beat the CNN by 0.86° on
+10/10. At H=10 the **CNN is better**: by 0.33° (9/10) under timestamp
+conditioning and 0.23° (6/10) under PV. Any text claiming LSTM superiority is
+wrong and has been rewritten. A useful side effect: the old "honest
+complication" (CNNs winning rollout MAE despite losing teacher-forced) no longer
+exists, because the CNN now leads on both.
+
+**(b) The saturation hypothesis is not supported.** §II-C predicts that phase
+conditioning should fail in terminal swing, where `s` has saturated. It does
+not — terminal swing is the *third most accurate* of the seven phases for all
+four models (4.24–4.62°). The phases that actually suffer are pre-swing and
+initial swing (5.08–5.69°), equally for all four models. The paper reports this
+as a refuted hypothesis rather than quietly dropping it.
+
+**(c) Amplitude, not timing, is the dominant rollout error.** In
+`figures/rollout_sagittal.png` every model overshoots the measured hip and knee
+peaks, the Timestamp LSTM badly (knee past 70° against a measured ~45°). Phase
+conditioning does not address this. Do not let the phase result imply the
+rollouts look good — they do not.
+
+**(d) Seed robustness — checked over 5 seeds, and the claim holds.** Run
+`aggregate_seeds.py` over `outputs_seed42..46` to reproduce:
+
+| Paired PV − Timestamp | LSTM | CNN |
+|---|---|---|
+| Hip phase \|lag\| | **−1.58 samples (5/5 seeds)** | **−1.27 (5/5)** |
+| Rollout MAE | −0.51° (5/5) | −0.21° (4/5) |
+| Teacher-forced MAE | −0.10° (5/5) | −0.04° (5/5) |
+
+The phase-lag advantage is negative in **every seed for both backbones** — that
+is the strongest form of the claim this dataset can support, and it is what to
+cite if a reviewer questions robustness. Magnitudes do move between seeds
+(LSTM lag effect ranges −2.92 to −0.42), so quote the direction and the
+consistency, not a precise effect size.
+
+**Seed 42 — the one the paper reports — is the least favourable of the five in
+absolute error** (teacher-forced means 5.66/5.48/5.22/5.13 against 5-seed means
+of 5.32/5.22/4.93/4.89). The paper's accuracy numbers are therefore pessimistic,
+which is the safe direction to be wrong in. Keep the tables and figures from the
+single seed 42 run so they stay mutually consistent; the 5-seed check belongs in
+Limitations, where it now is.
+
+To add more seeds:
+```bash
+for s in 47 48; do python run_comparison.py --seed $s --output outputs_seed$s --no-figures; done
+python aggregate_seeds.py outputs_seed*
+```
+
+### Figure anonymization
+
+Figure titles no longer contain subject IDs (`NV0xx`) or the string "TD" — the
+author asked for these out of the paper. The strings are built in
+`run_comparison.py` (rollout / cycle / per-phase titles) and `td_eval.py`
+(variability and scatter titles). **If you add a figure, do not put the subject
+ID in the title.** Prose and table captions still use "TD"/"typically
+developed", which is defined terminology rather than identifying information;
+confirm with the author if that should go too.
 
 ## 7. Paper state
 
-Source: `C:\Users\vagge\Desktop\Vaggelis\Documents\Ρομποτικη - ΕΜΠ\Διπλωματική - Exoskeleton\Karavas Diploma - Paper\Karavas-Biomechanics-Paper\Karavas2027ICRA.tex`
-— a **separate git repo** from this code repo. Renamed from `Karavas2026EMBC.tex`
-via `git mv`; uncommitted.
+Source: `../../Karavas-ICRA-2027-Paper/Karavas2027ICRA.tex` (on Linux:
+`~/Desktop/Karavas Exoskeleton/Karavas-ICRA-2027-Paper/`) — a **separate git
+repo** from this code repo, renamed from `Karavas2026EMBC.tex`. On Windows it
+lives under `...\Karavas Diploma - Paper\`. Both checkouts are the same repo;
+push from one before working in the other, or the two diverge silently — which
+is exactly what happened on 2026-09-12.
 
 **Done:**
 - Author block anonymized; real block commented out for camera-ready
@@ -190,21 +277,42 @@ via `git mv`; uncommitted.
 - §III-C: all four models share one horizon, so the Timestamp-CNN special case
   and its caveat are gone
 
-**Still to write — all of it needs the new numbers:**
-- Abstract (must get *shorter*)
-- Contributions paragraph closing §I
-- §IV Results, §V Discussion, §VI Conclusions
-- All tables (generate with `make_tables.py`, then paste)
-- Figure swaps: Figs. 4–7 still reference the old CP figures. New ones are in
-  `outputs/figures/`: `td_variability.png`, `rollout_sagittal.png`,
-  `subject_cycle_left.png`, `per_phase_bars.png`, `subject_scatter_mae.png`.
-  Copy into the paper's `figures/` folder.
+**Written 2026-09-12 against the full H=10 run (all of the below is now done):**
+- Abstract rewritten and shortened
+- Contributions paragraph closing §I rewritten around the three findings
+- §III-C: horizon corrected from one sample to 10, with the justification from
+  §5(a); the rollout **information asymmetry** now stated explicitly (a PV model
+  keeps receiving a *measured* `s` during rollout — see `td_eval.py:145`. This
+  is the deployment assumption the representation encodes, but it must be
+  declared or the comparison looks rigged)
+- §IV Results rewritten in three parts: the teacher-forced tie, the rollout
+  separation, the per-phase breakdown
+- §V Discussion and §VI Conclusions rewritten
+- All four tables inserted from `make_tables.py`
+- Figures swapped to `rollout_sagittal.png`, `subject_scatter_mae.png`,
+  `subject_cycle_left.png`; the CP figures are gone
+
+**Page budget — resolved, and fragile.** The draft hit 9 pages. To reach 8:
+the architecture figure was **cut** (§8 nominated it first), some prose was
+tightened, and the two `figure*` widths were reduced to `0.76`/`0.70`
+`\textwidth`. It now compiles to exactly 8 pages with no undefined references.
+**Any addition will push it over**, so budget before adding. `per_phase_bars.png`
+was left out for this reason; the per-phase *table* covers the same ground over
+all subjects rather than one.
+
+**Still open:**
+- The four `TODO(refs)` markers in §I — real citations still required. Do not
+  fabricate them.
+- Restore the real author block and the ELEPAP acknowledgement for camera-ready.
 
 ## 8. Traps
 
-- **Page budget.** 8 pages including references, with a longer introduction and
-  ~6 figures plus 3–4 tables. Something must go — most likely the architecture
-  figure (describable in text) or the per-subject scatter.
+- **Page budget — already spent.** The paper sits at *exactly* 8 pages. The
+  architecture figure and the nine-panel per-channel figure (`subject_cycle_left`)
+  have both already been cut to get there, along with several rounds of prose
+  tightening. **Adding the four missing citation groups will push it over**, so
+  budget the space before adding them: the likely next cut is the per-joint
+  table (Table II) or the per-phase table, each of which the prose can carry.
 - **Do not invent citations.** `References.bib` has no CNN/TCN or Transformer
   entries. The `TODO(refs)` markers in §I stay until real references are
   supplied. Fabricating plausible-looking references would be a serious error.

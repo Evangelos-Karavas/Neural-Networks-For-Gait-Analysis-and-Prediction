@@ -108,14 +108,29 @@ def _fix_stride_endpoints(block: np.ndarray, threshold: float = 5.0) -> np.ndarr
 
 
 def load_subject(files: list[Path]) -> pd.DataFrame:
-    """Concatenate one subject's stride files into a raw (unshifted) frame."""
+    """Concatenate one subject's stride files into a raw (unshifted) frame.
+
+    A stride with any missing joint angle is dropped rather than filled. Zero is
+    a physically plausible joint angle, so filling gaps with it fabricates a
+    flat segment that no complaint is ever raised about -- and because the left
+    phase variable is derived from the left hip, such a gap also silently
+    corrupts the conditioning signal. Foot-off is exempt: it is recorded only on
+    the first row of a stride and is legitimately empty elsewhere.
+    """
     frames = []
     for path in files:
         df = pd.read_excel(path, sheet_name=SHEET, usecols=LOAD_COLS, skiprows=SKIPROWS)
-        df = df[LOAD_COLS].fillna(0.0)
+        df = df[LOAD_COLS]
         if len(df) < STRIDE_LEN:
             continue
         df = df.iloc[:STRIDE_LEN].reset_index(drop=True)
+
+        missing = int(df[ANGLE_COLS].isna().to_numpy().sum())
+        if missing:
+            print(f"  dropped {path.name}: {missing} missing joint-angle samples")
+            continue
+
+        df = df.fillna(0.0)
         df.loc[:, ANGLE_COLS] = _fix_stride_endpoints(df[ANGLE_COLS].to_numpy(float))
         frames.append(df)
 
@@ -311,30 +326,43 @@ class Split:
 
 def make_repeated_splits(
     subject_ids: list[str],
-    n_repeats: int = 5,
+    n_repeats: int = 6,
     n_val: int = 2,
     n_test: int = 2,
     seed: int = 42,
 ) -> list[Split]:
-    """Repeated random subject-level splits, each with its own seed."""
+    """Subject-level splits whose test sets partition the cohort.
+
+    Test sets are consecutive, non-overlapping blocks of one shuffled ordering,
+    so when `n_repeats * n_test == len(subject_ids)` every subject is held out
+    exactly once. Drawing each test set independently at random does not do
+    this: with 12 subjects and 5 draws of 2 it left a third of the cohort never
+    evaluated while testing two subjects twice, which both wastes data and makes
+    the held-out evaluations less independent than their count suggests.
+
+    Past one full pass the ordering is reshuffled, so additional repeats revisit
+    subjects in a different arrangement rather than repeating the same blocks.
+    """
     subject_ids = sorted(subject_ids)
-    if n_val + n_test >= len(subject_ids):
+    n = len(subject_ids)
+    if n_val + n_test >= n:
         raise ValueError(
-            f"{len(subject_ids)} subjects cannot give {n_val} val + {n_test} test "
+            f"{n} subjects cannot give {n_val} val + {n_test} test "
             "and leave any for training"
         )
 
     splits = []
     for r in range(n_repeats):
-        perm = np.random.RandomState(seed + r).permutation(subject_ids)
-        splits.append(
-            Split(
-                repeat=r,
-                test=sorted(perm[:n_test].tolist()),
-                val=sorted(perm[n_test:n_test + n_val].tolist()),
-                train=sorted(perm[n_test + n_val:].tolist()),
-            )
+        round_i, offset = divmod(r * n_test, n)
+        perm = np.random.RandomState(seed + round_i).permutation(subject_ids).tolist()
+        test = sorted(perm[(offset + j) % n] for j in range(n_test))
+
+        rest = [s for s in subject_ids if s not in test]
+        val = sorted(
+            np.random.RandomState(seed + 1000 + r).permutation(rest)[:n_val].tolist()
         )
+        train = sorted(s for s in rest if s not in val)
+        splits.append(Split(repeat=r, train=train, val=val, test=test))
     return splits
 
 

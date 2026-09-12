@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 
 import td_eval as ev
 from td_models import MODEL_ORDER, MODEL_SPECS, training_callbacks
@@ -37,6 +38,7 @@ from td_pipeline import (
     load_all_subjects,
     make_repeated_splits,
     mean_toe_off,
+    prepare_frame,
 )
 
 MODEL_LABELS = {key: spec.label for key, spec in MODEL_SPECS.items()}
@@ -45,8 +47,9 @@ MODEL_LABELS = {key: spec.label for key, spec in MODEL_SPECS.items()}
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--repeats", type=int, default=5,
-                   help="number of random subject-level splits (default 5)")
+    p.add_argument("--repeats", type=int, default=6,
+                   help="subject-level splits; the default 6 x 2 test subjects "
+                        "holds out each of the 12 subjects exactly once")
     p.add_argument("--n-test", type=int, default=2, help="held-out test subjects per split")
     p.add_argument("--n-val", type=int, default=2, help="validation subjects per split")
     p.add_argument("--aug-rounds", type=int, default=7,
@@ -136,6 +139,10 @@ def main() -> None:
             x_train, y_train = fold.train_xy(spec.kind, args.horizon)
             x_val, y_val = fold.val_xy(spec.kind, args.horizon)
 
+            # Weight init and dropout are seeded per (split, model) so a rerun
+            # reproduces the published numbers; the splits are already seeded.
+            tf.keras.utils.set_random_seed(args.seed * 100 + split.repeat * 10
+                                           + MODEL_ORDER.index(key))
             model = spec.build(horizon=args.horizon)
             epochs = args.epochs or spec.epochs
             t0 = time.time()
@@ -341,6 +348,8 @@ def main() -> None:
         figs = out / "figures"
         ev.plot_td_variability(raw_frames, figs / "td_variability.png")
         ev.plot_subject_scatter(subject_df, figs / "subject_scatter_mae.png", MODEL_LABELS)
+        ev.plot_pv_strides(prepare_frame(raw_frames[subject_ids[0]]),
+                           figs / "pv_over_strides.png")
 
         sid = figure_cache.get("subject")
         if sid:
@@ -348,18 +357,18 @@ def main() -> None:
                 ev.plot_rollout(
                     figure_cache["rollout"], figure_cache["rollout_gt"],
                     figs / "rollout_sagittal.png",
-                    f"Recursive rollout over {args.rollout_strides} strides -- held-out TD subject {sid}",
+                    f"Recursive rollout over {args.rollout_strides} strides -- held-out subject",
                     MODEL_LABELS,
                 )
             ev.plot_subject_cycle(
                 figure_cache["teacher"], figure_cache["teacher_gt"],
                 figs / "subject_cycle_left.png",
-                f"Stride-averaged prediction vs ground truth -- held-out TD subject {sid}, left side",
+                "Stride-averaged prediction vs ground truth -- held-out subject, left side",
                 MODEL_LABELS,
             )
             ev.plot_per_phase_bars(
                 figure_cache["phase"], figs / "per_phase_bars.png",
-                f"Mean absolute error per gait phase -- held-out TD subject {sid}",
+                "Mean absolute error per gait phase -- held-out subject",
                 MODEL_LABELS,
             )
         print(f"\nFigures written to {figs}")

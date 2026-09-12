@@ -3,8 +3,9 @@
 
 Two backbones (LSTM, CNN) crossed with two temporal representations
 (timestamp, phase variable). All four take a 51-sample window and emit the
-18 joint angles at the next sample, so the prediction horizon is identical
-across models and the comparison is between backbone and conditioning only.
+18 joint angles over the next HORIZON samples in a single forward pass, so
+the prediction horizon is identical across models and the comparison is
+between backbone and conditioning only.
 """
 
 from __future__ import annotations
