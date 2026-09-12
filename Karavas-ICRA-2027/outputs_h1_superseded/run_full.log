@@ -1,0 +1,85 @@
+Loading TD subjects ...
+  12 subjects, 60 strides: NV031(5), NV033(5), NV036(5), NV037(6), NV038(5), NV039(5), NV041(5), NV042(5), NV043(5), NV044(5), NV045(5), NV046(4)
+
+=== split 0: test=['NV044', 'NV045'] val=['NV031', 'NV043'] ===
+  training frames: 64 (8 subjects x 8 copies)
+  Timestamp LSTM   windows= 13056  epochs= 49/150  val_loss=0.4951  (539s)
+  PV LSTM          windows= 13056  epochs= 34/150  val_loss=0.4469  (386s)
+  Timestamp CNN    windows= 13056  epochs= 83/200  val_loss=0.5521  (40s)
+  PV CNN           windows= 13056  epochs= 58/200  val_loss=0.4668  (76s)
+
+=== split 1: test=['NV041', 'NV046'] val=['NV042', 'NV043'] ===
+  training frames: 64 (8 subjects x 8 copies)
+  Timestamp LSTM   windows= 13464  epochs= 50/150  val_loss=0.2555  (1788s)
+  PV LSTM          windows= 13464  epochs= 37/150  val_loss=0.2358  (1041s)
+  Timestamp CNN    windows= 13464  epochs= 40/200  val_loss=0.3576  (60s)
+  PV CNN           windows= 13464  epochs= 34/200  val_loss=0.3964  (58s)
+
+=== split 2: test=['NV039', 'NV044'] val=['NV041', 'NV042'] ===
+  training frames: 64 (8 subjects x 8 copies)
+  Timestamp LSTM   windows= 13056  epochs= 73/150  val_loss=0.1639  (2538s)
+  PV LSTM          windows= 13056  epochs= 50/150  val_loss=0.1820  (2044s)
+  Timestamp CNN    windows= 13056  epochs= 57/200  val_loss=0.2879  (111s)
+  PV CNN           windows= 13056  epochs= 51/200  val_loss=0.3208  (91s)
+
+=== split 3: test=['NV036', 'NV041'] val=['NV042', 'NV043'] ===
+  training frames: 64 (8 subjects x 8 copies)
+  Timestamp LSTM   windows= 13056  epochs= 74/150  val_loss=0.2216  (3022s)
+  PV LSTM          windows= 13056  epochs= 69/150  val_loss=0.2179  (3087s)
+  Timestamp CNN    windows= 13056  epochs= 40/200  val_loss=0.3348  (80s)
+  PV CNN           windows= 13056  epochs= 43/200  val_loss=0.3400  (88s)
+
+=== split 4: test=['NV033', 'NV042'] val=['NV031', 'NV041'] ===
+  training frames: 64 (8 subjects x 8 copies)
+  Timestamp LSTM   windows= 13056  epochs= 56/150  val_loss=0.6734  (2813s)
+  PV LSTM          windows= 13056  epochs= 34/150  val_loss=0.7453  (1998s)
+  Timestamp CNN    windows= 13056  epochs= 41/200  val_loss=0.8309  (103s)
+  PV CNN           windows= 13056  epochs= 33/200  val_loss=0.8831  (87s)
+
+Figures written to C:\Users\vagge\Desktop\Vaggelis\Documents\Thesis\Neural-Networks-For-Gait-Analysis-and-Prediction\Karavas-ICRA-2027\outputs\figures
+
+
+## Teacher-forced accuracy on held-out TD subjects (all 18 channels)
+
+| Model | MAE (deg) | MAE SD | RMSE (deg) | RMSE SD | R2 | R2 SD | R2>0 |
+|---|---|---|---|---|---|---|---|
+| Timestamp LSTM | 3.35 | 0.54 | 4.04 | 0.59 | -0.05 | 0.70 | 6/10 |
+| PV LSTM | 3.51 | 0.53 | 4.21 | 0.55 | -0.11 | 0.78 | 6/10 |
+| Timestamp CNN | 4.21 | 0.52 | 5.00 | 0.58 | -0.51 | 0.91 | 5/10 |
+| PV CNN | 4.18 | 0.56 | 4.94 | 0.59 | -0.53 | 1.09 | 6/10 |
+
+## Per-joint teacher-forced error, sagittal plane (MAE/RMSE, degrees)
+
+| Joint | Timestamp LSTM | PV LSTM | Timestamp CNN | PV CNN |
+|---|---|---|---|---|
+| L Hip | 3.15/4.01 | 3.61/4.65 | 4.18/5.06 | 4.51/5.50 |
+| L Knee | 4.40/5.38 | 5.00/6.07 | 6.64/7.86 | 6.10/7.31 |
+| L Ankle | 2.67/3.26 | 2.95/3.63 | 2.90/3.73 | 3.10/3.94 |
+| R Hip | 3.73/4.48 | 4.42/5.22 | 5.00/5.88 | 5.19/5.89 |
+| R Knee | 4.99/6.13 | 5.66/6.83 | 6.53/8.00 | 6.08/7.48 |
+| R Ankle | 2.86/3.57 | 2.82/3.58 | 3.47/4.49 | 3.27/4.29 |
+| Mean | 3.63/4.47 | 4.08/5.00 | 4.79/5.84 | 4.71/5.73 |
+
+## Recursive rollout over 6 strides
+
+| Model | Rollout MAE (deg) | Rollout MAE SD | Rollout R2 | Hip phase lag (samples) |
+|---|---|---|---|---|
+| Timestamp LSTM | 7.70 | 1.39 | -3.77 | 5.10 |
+| PV LSTM | 6.04 | 1.98 | -1.89 | 0.70 |
+| Timestamp CNN | 4.83 | 0.95 | -0.84 | 2.00 |
+| PV CNN | 4.49 | 0.56 | -0.65 | 1.10 |
+
+## Mean absolute error per gait phase (degrees)
+
+| Phase | Timestamp LSTM | PV LSTM | Timestamp CNN | PV CNN |
+|---|---|---|---|---|
+| Loading Response | 3.48 | 3.47 | 3.83 | 3.89 |
+| Mid Stance | 3.06 | 3.08 | 3.62 | 3.63 |
+| Terminal Stance | 2.96 | 3.17 | 3.92 | 3.88 |
+| Pre- Swing | 3.71 | 3.73 | 4.99 | 4.99 |
+| Initial Swing | 3.66 | 4.01 | 4.96 | 4.85 |
+| Mid Swing | 3.40 | 3.81 | 4.61 | 4.38 |
+| Terminal Swing | 3.64 | 3.71 | 4.05 | 4.18 |
+
+
+Done in 20349s. Tables and report in C:\Users\vagge\Desktop\Vaggelis\Documents\Thesis\Neural-Networks-For-Gait-Analysis-and-Prediction\Karavas-ICRA-2027\outputs

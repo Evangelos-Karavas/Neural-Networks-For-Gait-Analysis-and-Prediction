@@ -1,0 +1,9 @@
+split 0 timestamp_cnn   MAE 4.34
+split 0 pv_cnn          MAE 4.32
+split 1 timestamp_cnn   MAE 3.52
+split 1 pv_cnn          MAE 3.66
+split 2 timestamp_cnn   MAE 4.92
+split 2 pv_cnn          MAE 4.74
+
+timestamp_cnn   mean 4.258 over 6 evals
+pv_cnn          mean 4.239 over 6 evals
