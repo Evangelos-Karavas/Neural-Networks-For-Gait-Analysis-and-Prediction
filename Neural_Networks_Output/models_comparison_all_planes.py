@@ -15,13 +15,13 @@ It then reports:
   - a per-subject x per-model summary table (mean MAE / mean R2 over the
     18 channels), so you can see how consistent each model is across
     different real patients
-  - optional full neural_networks_outputs/plots (pred vs gt, phase-binned error) for one chosen
+  - optional full plots (pred vs gt, phase-binned error) for one chosen
     subject across all 4 models
 
 Run from project root:
-  python models_comparison_all_planes.py --list-subjects
-  python models_comparison_all_planes.py                      # table over all held-out subjects
-  python models_comparison_all_planes.py --subject 3 --plot    # neural_networks_outputs/plots for one subject
+  python Neural_Networks_Output/models_comparison_all_planes.py --list-subjects
+  python Neural_Networks_Output/models_comparison_all_planes.py                      # table over all held-out subjects
+  python Neural_Networks_Output/models_comparison_all_planes.py --subject 3 --plot    # plots for one subject
 """
 
 import argparse
@@ -44,9 +44,9 @@ CP_SKIPROWS = [1, 2]
 MAX_CP_FILES = 500
 TRAIN_FRAC, VAL_FRAC, SPLIT_SEED = 0.70, 0.15, 42
 
-SAVE_DIR = "Neural_Networks_Outputs/Saved_Models"
-NEURAL_NETWORKS_OUTPUTS/SCALER_DIR = "Neural_Networks_Outputs/Scaler"
-PLOT_DIR = "Neural_Networks_Outputs/Plots"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+SCALER_DIR = "Neural_Networks_Output/Scaler"
+PLOT_DIR = "Neural_Networks_Output/Plots"
 
 ANGLE_COLS = [
     "LHipAngles (1)", "LHipAngles (2)", "LHipAngles (3)",
@@ -203,31 +203,31 @@ def load_cp_subject(files) -> pd.DataFrame:
 
 
 # ============================================================
-# Model + neural_networks_outputs/scaler loading
+# Model + scaler loading
 # ============================================================
 def load_all_models():
     models = {}
 
     models["timestamp_cnn"] = dict(
         model=load_model(os.path.join(SAVE_DIR, "Timestamp_cnn_next_tick_model_18.keras")),
-        neural_networks_outputs/scaler=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "standard_neural_networks_outputs/scaler_typical_cnn_next_tick_18.save")),
+        scaler=joblib.load(os.path.join(SCALER_DIR, "standard_scaler_typical_cnn_next_tick_18.save")),
         kind="timestamp",
     )
     models["timestamp_lstm"] = dict(
         model=load_model(os.path.join(SAVE_DIR, "Timestamp_lstm_next_tick_model_18.keras")),
-        neural_networks_outputs/scaler=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "standard_neural_networks_outputs/scaler_typical_lstm_next_tick_18.save")),
+        scaler=joblib.load(os.path.join(SCALER_DIR, "standard_scaler_typical_lstm_next_tick_18.save")),
         kind="timestamp",
     )
     models["pv_cnn"] = dict(
         model=load_model(os.path.join(SAVE_DIR, "PV_cnn_best_rollout_dtw_18ch.keras")),
-        neural_networks_outputs/scaler_pv=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "neural_networks_outputs/scaler_pv_cnn_18ch.save")),
-        neural_networks_outputs/scaler_ang=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "neural_networks_outputs/scaler_angles_cnn_18ch.save")),
+        scaler_pv=joblib.load(os.path.join(SCALER_DIR, "scaler_pv_cnn_18ch.save")),
+        scaler_ang=joblib.load(os.path.join(SCALER_DIR, "scaler_angles_cnn_18ch.save")),
         kind="pv",
     )
     models["pv_lstm"] = dict(
         model=load_model(os.path.join(SAVE_DIR, "PV_lstm_best_rollout_dtw_18ch.keras")),
-        neural_networks_outputs/scaler_pv=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "neural_networks_outputs/scaler_pv_lstm_18ch.save")),
-        neural_networks_outputs/scaler_ang=joblib.load(os.path.join(NEURAL_NETWORKS_OUTPUTS/SCALER_DIR, "neural_networks_outputs/scaler_angles_lstm_18ch.save")),
+        scaler_pv=joblib.load(os.path.join(SCALER_DIR, "scaler_pv_lstm_18ch.save")),
+        scaler_ang=joblib.load(os.path.join(SCALER_DIR, "scaler_angles_lstm_18ch.save")),
         kind="pv",
     )
     return models
@@ -243,8 +243,8 @@ def predict_next_tick(model_entry, df_subject: pd.DataFrame):
     df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS)
 
     if model_entry["kind"] == "timestamp":
-        neural_networks_outputs/scaler = model_entry["neural_networks_outputs/scaler"]
-        ang_sc = neural_networks_outputs/scaler.transform(df[ANGLE_COLS].to_numpy()).astype(np.float32)
+        scaler = model_entry["scaler"]
+        ang_sc = scaler.transform(df[ANGLE_COLS].to_numpy()).astype(np.float32)
         X, y = make_rolling_windows(ang_sc, ang_sc, WINDOW)
         if X is None:
             return None, None
@@ -252,23 +252,23 @@ def predict_next_tick(model_entry, df_subject: pd.DataFrame):
         pred_sc = np.asarray(pred_sc)
         if pred_sc.ndim == 3:        # multi-step head -> take immediate next-tick
             pred_sc = pred_sc[:, 0, :]
-        pred_deg = neural_networks_outputs/scaler.inverse_transform(pred_sc)
-        gt_deg = neural_networks_outputs/scaler.inverse_transform(y)
+        pred_deg = scaler.inverse_transform(pred_sc)
+        gt_deg = scaler.inverse_transform(y)
         return pred_deg, gt_deg
 
     else:  # PV models
         df = compute_phase_variables(df, STRIDE_LEN)
         df = apply_right_leg_half_stride_offset(df, STRIDE_LEN, RIGHT_ANGLE_COLS, pv_right_col="PhaseVariable_Right")
-        neural_networks_outputs/scaler_pv, neural_networks_outputs/scaler_ang = model_entry["neural_networks_outputs/scaler_pv"], model_entry["neural_networks_outputs/scaler_ang"]
-        pv_sc = neural_networks_outputs/scaler_pv.transform(df[PV_COLS].to_numpy())
-        ang_sc = neural_networks_outputs/scaler_ang.transform(df[ANGLE_COLS].to_numpy())
+        scaler_pv, scaler_ang = model_entry["scaler_pv"], model_entry["scaler_ang"]
+        pv_sc = scaler_pv.transform(df[PV_COLS].to_numpy())
+        ang_sc = scaler_ang.transform(df[ANGLE_COLS].to_numpy())
         feats = np.concatenate([pv_sc, ang_sc], axis=1)
         X, y = make_rolling_windows(feats, ang_sc, WINDOW)
         if X is None:
             return None, None
         pred_sc = model_entry["model"].predict(X, verbose=0)
-        pred_deg = neural_networks_outputs/scaler_ang.inverse_transform(pred_sc)
-        gt_deg = neural_networks_outputs/scaler_ang.inverse_transform(y)
+        pred_deg = scaler_ang.inverse_transform(pred_sc)
+        gt_deg = scaler_ang.inverse_transform(y)
         return pred_deg, gt_deg
 
 
@@ -287,10 +287,10 @@ def compute_metrics_deg(pred: np.ndarray, gt: np.ndarray):
 
 
 # ============================================================
-# Neural_Networks_Outputs/Plots (one subject, all 4 models)
+# Plots (one subject, all 4 models)
 # ============================================================
 def _grid_fig(side, title, ylabel):
-    fig, axes = plt.subneural_networks_outputs/plots(3, 3, figsize=(15, 9), sharex=True)
+    fig, axes = plt.subplots(3, 3, figsize=(15, 9), sharex=True)
     fig.suptitle(f"{title} — {side} Side", fontsize=12)
     for row, joint in enumerate(JOINTS):
         for col, plane in enumerate(PLANES):
@@ -372,7 +372,7 @@ def main():
     parser = argparse.ArgumentParser(description="Compare 4 all-planes models across multiple held-out CP subjects")
     parser.add_argument("--list-subjects", action="store_true", help="List held-out CP test files with their index and exit")
     parser.add_argument("--subject", type=int, default=None, help="Index (from --list-subjects) of one subject to inspect")
-    parser.add_argument("--plot", action="store_true", help="Show neural_networks_outputs/plots for the chosen --subject")
+    parser.add_argument("--plot", action="store_true", help="Show plots for the chosen --subject")
     parser.add_argument("--no_save", action="store_true", help="Don't save PNGs when plotting")
     args = parser.parse_args()
 

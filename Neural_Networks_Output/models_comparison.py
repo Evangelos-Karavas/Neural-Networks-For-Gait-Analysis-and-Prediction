@@ -26,26 +26,26 @@ CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
 
-PRED_DIR = "Predictions"
+PRED_DIR = "Neural_Networks_Output/Predictions"
 os.makedirs(PRED_DIR, exist_ok=True)
 
 # -----------------------------
 # LSTM artifacts
 # -----------------------------
-TIMESTAMP_LSTM_MODEL_PATH = "Saved_Models/Timestamp_lstm_model.keras"
-TIMESTAMP_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH = "Neural_Networks_Outputs/Scaler/standard_neural_networks_outputs/scaler_typical_lstm.save"
+TIMESTAMP_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Timestamp_lstm_model.keras"
+TIMESTAMP_LSTM_SCALER_PATH = "Neural_Networks_Output/Scaler/standard_scaler_typical_lstm.save"
 
-TIMESTAMP_CNN_MODEL_PATH = "Saved_Models/Timestamp_cnn_model.keras"
-TIMESTAMP_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH = "Neural_Networks_Outputs/Scaler/standard_neural_networks_outputs/scaler_typical_cnn.save"
+TIMESTAMP_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Timestamp_cnn_model.keras"
+TIMESTAMP_CNN_SCALER_PATH = "Neural_Networks_Output/Scaler/standard_scaler_typical_cnn.save"
 
-PV_LSTM_MODEL_PATH = "Saved_Models\PV_rolling_next_tick_lstm.keras"
-PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH = "Neural_Networks_Outputs/Scaler/neural_networks_outputs/scaler_pv.save"
-PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH = "Neural_Networks_Outputs/Scaler/neural_networks_outputs/scaler_angles.save"
+PV_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/PV_rolling_next_tick_lstm.keras"
+PV_LSTM_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/scaler_pv.save"
+PV_LSTM_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/scaler_angles.save"
 
 
-PV_CNN_MODEL_PATH = "Saved_Models/PV_rolling_next_tick_cnn.keras"
-PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH = "Neural_Networks_Outputs/Scaler/neural_networks_outputs/scaler_pv_cnn.save"
-PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH = "Neural_Networks_Outputs/Scaler/neural_networks_outputs/scaler_angles_cnn.save"
+PV_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/PV_rolling_next_tick_cnn.keras"
+PV_CNN_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/scaler_pv_cnn.save"
+PV_CNN_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/scaler_angles_cnn.save"
 
 # -----------------------------
 # columns
@@ -245,7 +245,7 @@ def plot_one_stride_one_step(stride_in_deg_51x6, pred_next_deg_6, gt_next_deg_6,
     x_in = np.arange(51)
     x_next = 51
 
-    fig, axes = plt.subneural_networks_outputs/plots(3, 2, figsize=(10, 8), sharex=False)
+    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
     axes = axes.flatten()
     placement = [0, 3, 1, 4, 2, 5]
 
@@ -275,7 +275,7 @@ def plot_rollout_one_step_ahead(input_window_deg, pred_series_deg, gt_series_deg
     x_in = np.arange(W)
     x_out = np.arange(W, W + H)
 
-    fig, axes = plt.subneural_networks_outputs/plots(3, 2, figsize=(10, 8), sharex=False)
+    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=False)
     axes = axes.flatten()
     placement = [0, 3, 1, 4, 2, 5]
 
@@ -299,7 +299,7 @@ def plot_gt_multi(gt_deg_2d, preds_dict_deg_2d, title="Ground Truth vs Models"):
     gt = np.asarray(gt_deg_2d)
     t = np.arange(gt.shape[0])
 
-    fig, axes = plt.subneural_networks_outputs/plots(6, 1, figsize=(12, 16), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
         ax.plot(t, gt[:, j], label="Ground Truth")
         for name, pr in preds_dict_deg_2d.items():
@@ -317,7 +317,7 @@ def plot_abs_error_multi(gt_deg_2d, preds_dict_deg_2d, title="|Error| vs time"):
     gt = np.asarray(gt_deg_2d)
     t = np.arange(gt.shape[0])
 
-    fig, axes = plt.subneural_networks_outputs/plots(6, 1, figsize=(12, 16), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
         for name, pr in preds_dict_deg_2d.items():
             pr = np.asarray(pr)
@@ -336,7 +336,7 @@ def plot_residual_hist_multi(gt_deg_2d, preds_dict_deg_2d, title="Residual histo
     names = list(preds_dict_deg_2d.keys())
     n_models = len(names)
 
-    fig, axes = plt.subneural_networks_outputs/plots(6, n_models, figsize=(4*n_models + 2, 14))
+    fig, axes = plt.subplots(6, n_models, figsize=(4*n_models + 2, 14))
     if n_models == 1:
         axes = np.expand_dims(axes, axis=1)
 
@@ -372,7 +372,7 @@ def plot_error_vs_phase_multi(pv_phase_1d, gt_deg_2d, preds_dict_deg_2d, nbins=2
     gt = np.asarray(gt_deg_2d)
     x = (np.arange(nbins) + 0.5) / nbins
 
-    fig, axes = plt.subneural_networks_outputs/plots(6, 1, figsize=(12, 16), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
     for j, ax in enumerate(axes):
         for name, pr in preds_dict_deg_2d.items():
             pr = np.asarray(pr)
@@ -444,9 +444,9 @@ def main():
     # ---- Check files exist ----
     paths = [
         TIMESTAMP_LSTM_MODEL_PATH, PV_LSTM_MODEL_PATH,
-        TIMESTAMP_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH, PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH, PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH,
-        TIMESTAMP_CNN_MODEL_PATH, TIMESTAMP_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH,
-        PV_CNN_MODEL_PATH, PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH, PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH
+        TIMESTAMP_LSTM_SCALER_PATH, PV_LSTM_SCALER_PV_PATH, PV_LSTM_SCALER_ANGLES_PATH,
+        TIMESTAMP_CNN_MODEL_PATH, TIMESTAMP_CNN_SCALER_PATH,
+        PV_CNN_MODEL_PATH, PV_CNN_SCALER_PV_PATH, PV_CNN_SCALER_ANGLES_PATH
     ]
     for p in paths:
         if not os.path.exists(p):
@@ -458,16 +458,16 @@ def main():
     ts_cnn  = load_model(TIMESTAMP_CNN_MODEL_PATH)
     pv_cnn  = load_model(PV_CNN_MODEL_PATH)
 
-    # ---- Load neural_networks_outputs/scalers ----
-    ts_lstm_neural_networks_outputs/scaler = joblib.load(TIMESTAMP_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH)
+    # ---- Load scalers ----
+    ts_lstm_scaler = joblib.load(TIMESTAMP_LSTM_SCALER_PATH)
 
-    pv_lstm_neural_networks_outputs/scaler_pv    = joblib.load(PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH)
-    pv_lstm_neural_networks_outputs/scaler_angles= joblib.load(PV_LSTM_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH)
+    pv_lstm_scaler_pv    = joblib.load(PV_LSTM_SCALER_PV_PATH)
+    pv_lstm_scaler_angles= joblib.load(PV_LSTM_SCALER_ANGLES_PATH)
 
-    ts_cnn_neural_networks_outputs/scaler = joblib.load(TIMESTAMP_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PATH)
+    ts_cnn_scaler = joblib.load(TIMESTAMP_CNN_SCALER_PATH)
 
-    pv_cnn_neural_networks_outputs/scaler_pv     = joblib.load(PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_PV_PATH)
-    pv_cnn_neural_networks_outputs/scaler_angles = joblib.load(PV_CNN_NEURAL_NETWORKS_OUTPUTS/SCALER_ANGLES_PATH)
+    pv_cnn_scaler_pv     = joblib.load(PV_CNN_SCALER_PV_PATH)
+    pv_cnn_scaler_angles = joblib.load(PV_CNN_SCALER_ANGLES_PATH)
 
     # ---- Build CP dataframe with PV + right-shift applied ----
     cp_df = load_cp_dataframe_with_pv(CP_FOLDER, MAX_CP_FILES)
@@ -475,24 +475,24 @@ def main():
     # ---- Base angles in degrees ----
     cp_angles_deg = cp_df[ANGLE_COLS].to_numpy()
 
-    # ---- Build windows for TS-LSTM (angles-only, scaled with ts_lstm_neural_networks_outputs/scaler) ----
-    angles_scaled_ts_lstm = ts_lstm_neural_networks_outputs/scaler.transform(cp_angles_deg)
+    # ---- Build windows for TS-LSTM (angles-only, scaled with ts_lstm_scaler) ----
+    angles_scaled_ts_lstm = ts_lstm_scaler.transform(cp_angles_deg)
     X_ts_lstm, y_ts_lstm  = make_rolling_windows(angles_scaled_ts_lstm, angles_scaled_ts_lstm, window=WINDOW)
 
-    # ---- Build windows for PV-LSTM (pv+angles, scaled with pv_lstm neural_networks_outputs/scalers) ----
+    # ---- Build windows for PV-LSTM (pv+angles, scaled with pv_lstm scalers) ----
     cp_pv = cp_df[PV_COLS].to_numpy()
-    pv_scaled_lstm = pv_lstm_neural_networks_outputs/scaler_pv.transform(cp_pv)
-    angles_scaled_pv_lstm = pv_lstm_neural_networks_outputs/scaler_angles.transform(cp_angles_deg)
+    pv_scaled_lstm = pv_lstm_scaler_pv.transform(cp_pv)
+    angles_scaled_pv_lstm = pv_lstm_scaler_angles.transform(cp_angles_deg)
     feat_scaled_pv_lstm = np.concatenate([pv_scaled_lstm, angles_scaled_pv_lstm], axis=1)  # (T,8)
     X_pv_lstm, y_pv_lstm = make_rolling_windows(feat_scaled_pv_lstm, angles_scaled_pv_lstm, window=WINDOW)
 
-    # ---- Build windows for TS-CNN (angles-only, scaled with ts_cnn_neural_networks_outputs/scaler) ----
-    angles_scaled_ts_cnn = ts_cnn_neural_networks_outputs/scaler.transform(cp_angles_deg)
+    # ---- Build windows for TS-CNN (angles-only, scaled with ts_cnn_scaler) ----
+    angles_scaled_ts_cnn = ts_cnn_scaler.transform(cp_angles_deg)
     X_ts_cnn, y_ts_cnn   = make_rolling_windows(angles_scaled_ts_cnn, angles_scaled_ts_cnn, window=WINDOW)
 
-    # ---- Build windows for PV-CNN (pv+angles, scaled with pv_cnn neural_networks_outputs/scalers) ----
-    pv_scaled_cnn = pv_cnn_neural_networks_outputs/scaler_pv.transform(cp_pv)
-    angles_scaled_pv_cnn = pv_cnn_neural_networks_outputs/scaler_angles.transform(cp_angles_deg)
+    # ---- Build windows for PV-CNN (pv+angles, scaled with pv_cnn scalers) ----
+    pv_scaled_cnn = pv_cnn_scaler_pv.transform(cp_pv)
+    angles_scaled_pv_cnn = pv_cnn_scaler_angles.transform(cp_angles_deg)
     feat_scaled_pv_cnn = np.concatenate([pv_scaled_cnn, angles_scaled_pv_cnn], axis=1)  # (T,8)
     X_pv_cnn, y_pv_cnn = make_rolling_windows(feat_scaled_pv_cnn, angles_scaled_pv_cnn, window=WINDOW)
 
@@ -504,7 +504,7 @@ def main():
     X_pv_cnn,  y_pv_cnn  = X_pv_cnn[:N],  y_pv_cnn[:N]
 
     # ============================================================
-    # SEGMENT EVALUATION + NEURAL_NETWORKS_OUTPUTS/PLOTS
+    # SEGMENT EVALUATION + PLOTS
     # ============================================================
     T_plot = 300
     start = max(0, N - T_plot)
@@ -520,14 +520,14 @@ def main():
     pred_ts_cnn_scaled  = predict_next_tick_scaled(ts_cnn,  X_ts_cnn_seg)    # (T,6) (adapter handles (T,51,6))
     pred_pv_cnn_scaled  = predict_next_tick_scaled(pv_cnn,  X_pv_cnn_seg)    # (T,6)
 
-    # Ground-truth degrees: use PV angle neural_networks_outputs/scaler (LSTM) target space for consistency
-    gt_seg_deg = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(y_pv_lstm_seg)
+    # Ground-truth degrees: use PV angle scaler (LSTM) target space for consistency
+    gt_seg_deg = pv_lstm_scaler_angles.inverse_transform(y_pv_lstm_seg)
 
-    # Convert each model prediction to degrees using its own angle neural_networks_outputs/scaler
-    pred_ts_lstm_deg = ts_lstm_neural_networks_outputs/scaler.inverse_transform(pred_ts_lstm_scaled)
-    pred_pv_lstm_deg = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_lstm_scaled)
-    pred_ts_cnn_deg  = ts_cnn_neural_networks_outputs/scaler.inverse_transform(pred_ts_cnn_scaled)
-    pred_pv_cnn_deg  = pv_cnn_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_cnn_scaled)
+    # Convert each model prediction to degrees using its own angle scaler
+    pred_ts_lstm_deg = ts_lstm_scaler.inverse_transform(pred_ts_lstm_scaled)
+    pred_pv_lstm_deg = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_scaled)
+    pred_ts_cnn_deg  = ts_cnn_scaler.inverse_transform(pred_ts_cnn_scaled)
+    pred_pv_cnn_deg  = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_scaled)
 
     # Print metrics (all 4)
     print_metrics(gt_seg_deg, pred_ts_lstm_deg, "TS-LSTM")
@@ -548,8 +548,8 @@ def main():
     plot_residual_hist_multi(gt_seg_deg, preds_seg, title="Residual histograms (Pred - Ground Truth)")
 
     # Phase for each tick corresponds to last timestep of each PV window in this segment
-    pv_last_scaled = X_pv_lstm_seg[:, -1, :2]  # (T,2) in pv_lstm neural_networks_outputs/scaler space
-    pv_last = pv_lstm_neural_networks_outputs/scaler_pv.inverse_transform(pv_last_scaled)
+    pv_last_scaled = X_pv_lstm_seg[:, -1, :2]  # (T,2) in pv_lstm scaler space
+    pv_last = pv_lstm_scaler_pv.inverse_transform(pv_last_scaled)
     pv_left = pv_last[:, 0]
 
     plot_error_vs_phase_multi(
@@ -589,19 +589,19 @@ def main():
 
     # TS-LSTM one-step
     pred_ts_lstm_one_scaled = predict_next_tick_scaled(ts_lstm, X_ts_lstm[i:i+1])[0]
-    pred_ts_lstm_one_deg = ts_lstm_neural_networks_outputs/scaler.inverse_transform(pred_ts_lstm_one_scaled.reshape(1,-1))[0]
+    pred_ts_lstm_one_deg = ts_lstm_scaler.inverse_transform(pred_ts_lstm_one_scaled.reshape(1,-1))[0]
 
     # PV-LSTM one-step
     pred_pv_lstm_one_scaled = predict_next_tick_scaled(pv_lstm, X_pv_lstm[i:i+1])[0]
-    pred_pv_lstm_one_deg = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_lstm_one_scaled.reshape(1,-1))[0]
+    pred_pv_lstm_one_deg = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_one_scaled.reshape(1,-1))[0]
 
     # TS-CNN one-step (adapter handles 51x6 output)
     pred_ts_cnn_one_scaled = predict_next_tick_scaled(ts_cnn, X_ts_cnn[i:i+1])[0]
-    pred_ts_cnn_one_deg = ts_cnn_neural_networks_outputs/scaler.inverse_transform(pred_ts_cnn_one_scaled.reshape(1,-1))[0]
+    pred_ts_cnn_one_deg = ts_cnn_scaler.inverse_transform(pred_ts_cnn_one_scaled.reshape(1,-1))[0]
 
     # PV-CNN one-step
     pred_pv_cnn_one_scaled = predict_next_tick_scaled(pv_cnn, X_pv_cnn[i:i+1])[0]
-    pred_pv_cnn_one_deg = pv_cnn_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_cnn_one_scaled.reshape(1,-1))[0]
+    pred_pv_cnn_one_deg = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_one_scaled.reshape(1,-1))[0]
 
     plot_one_stride_one_step(stride_in_deg, pred_ts_lstm_one_deg, gt_next_deg, title_prefix="TS-LSTM")
     plot_one_stride_one_step(stride_in_deg, pred_pv_lstm_one_deg, gt_next_deg, title_prefix="PV-LSTM")
@@ -631,9 +631,9 @@ def main():
     pred_ts_lstm_scaled, gt_ts_lstm_scaled, input_ts_lstm_scaled = rollout_from_dataset_next_tick_any(
         ts_lstm, X_ts_lstm, y_ts_lstm, start_i=start_i, horizon=H
     )
-    input_ts_lstm_deg = ts_lstm_neural_networks_outputs/scaler.inverse_transform(input_ts_lstm_scaled[:, :6])
-    pred_ts_lstm_deg  = ts_lstm_neural_networks_outputs/scaler.inverse_transform(pred_ts_lstm_scaled)
-    gt_ts_lstm_deg    = ts_lstm_neural_networks_outputs/scaler.inverse_transform(gt_ts_lstm_scaled)
+    input_ts_lstm_deg = ts_lstm_scaler.inverse_transform(input_ts_lstm_scaled[:, :6])
+    pred_ts_lstm_deg  = ts_lstm_scaler.inverse_transform(pred_ts_lstm_scaled)
+    gt_ts_lstm_deg    = ts_lstm_scaler.inverse_transform(gt_ts_lstm_scaled)
 
     plot_rollout_one_step_ahead(input_ts_lstm_deg, pred_ts_lstm_deg, gt_ts_lstm_deg, title_prefix="TS-LSTM")
 
@@ -641,9 +641,9 @@ def main():
     pred_pv_lstm_scaled, gt_pv_lstm_scaled, input_pv_lstm_scaled = rollout_from_dataset_next_tick_any(
         pv_lstm, X_pv_lstm, y_pv_lstm, start_i=start_i, horizon=H
     )
-    input_pv_lstm_deg = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(input_pv_lstm_scaled[:, 2:])
-    pred_pv_lstm_deg  = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_lstm_scaled)
-    gt_pv_lstm_deg    = pv_lstm_neural_networks_outputs/scaler_angles.inverse_transform(gt_pv_lstm_scaled)
+    input_pv_lstm_deg = pv_lstm_scaler_angles.inverse_transform(input_pv_lstm_scaled[:, 2:])
+    pred_pv_lstm_deg  = pv_lstm_scaler_angles.inverse_transform(pred_pv_lstm_scaled)
+    gt_pv_lstm_deg    = pv_lstm_scaler_angles.inverse_transform(gt_pv_lstm_scaled)
 
     plot_rollout_one_step_ahead(input_pv_lstm_deg, pred_pv_lstm_deg, gt_pv_lstm_deg, title_prefix="PV-LSTM")
 
@@ -651,9 +651,9 @@ def main():
     pred_ts_cnn_scaled, gt_ts_cnn_scaled, input_ts_cnn_scaled = rollout_from_dataset_next_tick_any(
         ts_cnn, X_ts_cnn, y_ts_cnn, start_i=start_i, horizon=H
     )
-    input_ts_cnn_deg = ts_cnn_neural_networks_outputs/scaler.inverse_transform(input_ts_cnn_scaled[:, :6])
-    pred_ts_cnn_deg  = ts_cnn_neural_networks_outputs/scaler.inverse_transform(pred_ts_cnn_scaled)
-    gt_ts_cnn_deg    = ts_cnn_neural_networks_outputs/scaler.inverse_transform(gt_ts_cnn_scaled)
+    input_ts_cnn_deg = ts_cnn_scaler.inverse_transform(input_ts_cnn_scaled[:, :6])
+    pred_ts_cnn_deg  = ts_cnn_scaler.inverse_transform(pred_ts_cnn_scaled)
+    gt_ts_cnn_deg    = ts_cnn_scaler.inverse_transform(gt_ts_cnn_scaled)
 
     plot_rollout_one_step_ahead(input_ts_cnn_deg, pred_ts_cnn_deg, gt_ts_cnn_deg, title_prefix="TS-CNN")
 
@@ -661,9 +661,9 @@ def main():
     pred_pv_cnn_scaled, gt_pv_cnn_scaled, input_pv_cnn_scaled = rollout_from_dataset_next_tick_any(
         pv_cnn, X_pv_cnn, y_pv_cnn, start_i=start_i, horizon=H
     )
-    input_pv_cnn_deg = pv_cnn_neural_networks_outputs/scaler_angles.inverse_transform(input_pv_cnn_scaled[:, 2:])
-    pred_pv_cnn_deg  = pv_cnn_neural_networks_outputs/scaler_angles.inverse_transform(pred_pv_cnn_scaled)
-    gt_pv_cnn_deg    = pv_cnn_neural_networks_outputs/scaler_angles.inverse_transform(gt_pv_cnn_scaled)
+    input_pv_cnn_deg = pv_cnn_scaler_angles.inverse_transform(input_pv_cnn_scaled[:, 2:])
+    pred_pv_cnn_deg  = pv_cnn_scaler_angles.inverse_transform(pred_pv_cnn_scaled)
+    gt_pv_cnn_deg    = pv_cnn_scaler_angles.inverse_transform(gt_pv_cnn_scaled)
 
     plot_rollout_one_step_ahead(input_pv_cnn_deg, pred_pv_cnn_deg, gt_pv_cnn_deg, title_prefix="PV-CNN")
 

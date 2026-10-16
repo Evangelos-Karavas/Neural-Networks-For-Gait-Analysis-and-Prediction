@@ -8,6 +8,8 @@ from scipy.signal import savgol_filter
 # ==========================================
 DATA_FOLDER = "Data_Normal"
 OUTPUT_FILE = "Data_Normal/dynamics_total_augmented.xlsx"
+# Output files of the augmentation scripts (no "Data" sheet); skip them on re-runs
+EXCLUDE_FILES = {"randomized_data_healthy.xlsx", "dynamics_total_augmented.xlsx"}
 STRIDE = 51
 
 NUM_TOTAL_CYCLES    = 500
@@ -101,8 +103,8 @@ def compute_phase_variables(df, stride_len, lhip_col, rhip_col, lfo_col, rfo_col
 # Load all data from Data_Normal
 # ==========================================
 all_data = []
-for file in os.listdir(DATA_FOLDER):
-    if file.endswith(".xlsx"):
+for file in sorted(os.listdir(DATA_FOLDER)):
+    if file.endswith(".xlsx") and file not in EXCLUDE_FILES:
         df = pd.read_excel(
             os.path.join(DATA_FOLDER, file),
             sheet_name="Data",

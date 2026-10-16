@@ -2,7 +2,7 @@
 """
 plot_planes_from_folders_0to51.py
 
-Separate overlay neural_networks_outputs/plots (NO resampling) for TD + CP using your REAL files:
+Separate overlay plots (NO resampling) for TD + CP using your REAL files:
 
 - TD: reads many .xlsx from Data_Normal/
 - CP: reads many .xlsx from Data_CP/
@@ -16,9 +16,9 @@ Each figure overlays N_STRIDES_PLOT strides:
 X axis is sample index 0..(STRIDE_LEN-1) (default 0..50 for STRIDE_LEN=51)
 
 Outputs (examples):
-  Neural_Networks_Outputs/Plots/TD_sagittal_hip.png
-  Neural_Networks_Outputs/Plots/TD_frontal_knee.png
-  Neural_Networks_Outputs/Plots/CP_transverse_ankle.png
+  Neural_Networks_Output/Plots/TD_sagittal_hip.png
+  Neural_Networks_Output/Plots/TD_frontal_knee.png
+  Neural_Networks_Output/Plots/CP_transverse_ankle.png
 """
 
 import os
@@ -42,7 +42,7 @@ MAX_CP_FILES = 500
 STRIDE_LEN = 51          # stored stride length
 N_STRIDES_PLOT = 40      # how many strides to overlay per plot
 
-OUT_DIR = "Neural_Networks_Outputs/Plots"
+OUT_DIR = "Neural_Networks_Output/Plots"
 
 PLANE_NAME = {1: "sagittal", 2: "frontal", 3: "transverse"}
 
@@ -201,7 +201,7 @@ def main():
         plot_joint_group(cp_strides, "ankle", plane_name, "CP",
                          os.path.join(OUT_DIR, f"CP_{plane_name}_ankle.png"), N_STRIDES_PLOT)
 
-    print(f"\nDone. Saved neural_networks_outputs/plots to: {OUT_DIR}/")
+    print(f"\nDone. Saved plots to: {OUT_DIR}/")
 
 
 if __name__ == "__main__":

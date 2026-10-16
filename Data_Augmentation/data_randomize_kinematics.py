@@ -5,6 +5,8 @@ from scipy.signal import savgol_filter
 
 # Set the folder path
 folder_path = "Data_Normal"
+# Output files of the augmentation scripts (no "Data" sheet); skip them on re-runs
+EXCLUDE_FILES = {"randomized_data_healthy.xlsx", "dynamics_total_augmented.xlsx"}
 
 STRIDE_LEN = 51
 
@@ -22,8 +24,8 @@ PV_COLS = ['PhaseVariable_Left', 'PhaseVariable_Right']
 # Collect all data
 all_data = []
 
-for file in os.listdir(folder_path):
-    if file.endswith(".xlsx"):
+for file in sorted(os.listdir(folder_path)):
+    if file.endswith(".xlsx") and file not in EXCLUDE_FILES:
         file_path = os.path.join(folder_path, file)
         df = pd.read_excel(file_path, sheet_name="Data", usecols=columns_to_read, skiprows=[1, 2])
         all_data.append(df)
@@ -112,6 +114,7 @@ column_std = merged_data.std()
 num_total_cycles = 500
 num_original_cycles = 60
 num_noisy_cycles = num_total_cycles - num_original_cycles
+np.random.seed(42)
 randomized_data = []
 base_noise = 0.1
 
