@@ -16,8 +16,8 @@ Aligned with your Timestamp LSTM rolling next-tick pipeline:
         - Single-stride one-step-ahead (blue line + green x + red x) for 18 channels
         - Rolling one-step-ahead rollout plot (blue input, red GT, green x preds) for 18 channels
   - Save model + scaler:
-        - Saved_Models/Timestamp_cnn_next_tick_model_18.keras
-        - Scaler/standard_scaler_typical_cnn_next_tick_18.save
+        - Saved_Models/All_Channels/Timestamp_cnn_next_tick_model_18.keras
+        - Scaler/All_Channels/standard_scaler_typical_cnn_next_tick_18.save
 
 Expected:
   - Data_Normal/randomized_data_healthy.xlsx
@@ -90,8 +90,8 @@ ROLL_H = 250        # rollout horizon
 ROLL_START_STRIDE = 10  # stride-aligned start (start_i = stride * 51)
 
 # Output folders/files
-SAVE_DIR = "Neural_Networks_Output/Saved_Models"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models/All_Channels"
+SCALER_DIR = "Neural_Networks_Output/Scaler/All_Channels"
 PRED_DIR = "Neural_Networks_Output/Predictions"
 PLOT_DIR = "Neural_Networks_Output/Plots"
 

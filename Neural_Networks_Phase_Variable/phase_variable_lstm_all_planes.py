@@ -44,9 +44,9 @@ CP_FOLDER    = "Data_CP/"
 CP_SHEET     = "Data"
 CP_SKIPROWS  = [1, 2]
 
-SAVE_DIR   = "Neural_Networks_Output/Saved_Models"
+SAVE_DIR   = "Neural_Networks_Output/Saved_Models/All_Channels"
 PRED_DIR   = "Neural_Networks_Output/Predictions"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SCALER_DIR = "Neural_Networks_Output/Scaler/All_Channels"
 PLOT_DIR   = "Neural_Networks_Output/Plots"
 
 # 18 columns: 6 joints × 3 planes

@@ -51,8 +51,8 @@ python models_complete_comparison.py --demo
 | `--no_save` | Show plots without saving PNGs. |
 | `--demo` | Render the plots from synthetic data and exit. |
 
-The models and scalers are loaded from `Neural_Networks_Output/Saved_Models/`
-and `Neural_Networks_Output/Scaler/`. The file names are listed in the main
+The models and scalers are loaded from `Neural_Networks_Output/Saved_Models/All_Channels/`
+and `Neural_Networks_Output/Scaler/All_Channels/`. The file names are listed in the main
 README under [Outputs](README.md#outputs).
 
 ## Plots

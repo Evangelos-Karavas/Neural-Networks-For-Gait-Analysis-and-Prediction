@@ -7,6 +7,8 @@ Neural_Networks_Output/Plots/
 Neural_Networks_Output/Plots_Comparison/
 Neural_Networks_Output/Predictions/
 Neural_Networks_Output/Saved_Models/
+Neural_Networks_Output/Scaler/
+Neural_Networks_Output/Subjects/
 
 # ICRA-2027 paper workspace (kept locally, not published)
 Karavas-ICRA-2027/

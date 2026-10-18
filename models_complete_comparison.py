@@ -58,8 +58,8 @@ NORMAL_EXCLUDE_FILES = {
     "Healthy_Data_1_Person.xlsx",
 }
 
-SAVE_DIR = "Neural_Networks_Output/Saved_Models"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models/All_Channels"
+SCALER_DIR = "Neural_Networks_Output/Scaler/All_Channels"
 PLOT_DIR = "Neural_Networks_Output/Subjects/SUBJECT_5"
 
 ANGLE_COLS = [

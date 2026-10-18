@@ -16,8 +16,8 @@ This version is intentionally aligned with your Timestamp LSTM rolling next-tick
         - Single-stride one-step-ahead (blue line + green x + red x)
         - Rolling one-step-ahead rollout plot (blue input, red GT, green x preds)
   Save model + scaler into the same folders:
-        - Saved_Models/Timestamp_cnn_next_tick_model.keras
-        - Scaler/standard_scaler_typical_cnn_next_tick.save
+        - Saved_Models/Sagittal_only/Timestamp_cnn_model.keras
+        - Scaler/Sagittal_only/standard_scaler_typical_cnn.save
 
 Expected:
   - Data_Normal/randomized_data_healthy.xlsx
@@ -74,8 +74,8 @@ ROLL_H = 250        # rollout horizon
 ROLL_START_STRIDE = 10  # stride-aligned start (start_i = stride * 51)
 
 # Output folders/files
-SAVE_DIR = "Neural_Networks_Output/Saved_Models"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models/Sagittal_only"
+SCALER_DIR = "Neural_Networks_Output/Scaler/Sagittal_only"
 PRED_DIR = "Neural_Networks_Output/Predictions"
 PLOT_DIR = "Neural_Networks_Output/Plots"
 

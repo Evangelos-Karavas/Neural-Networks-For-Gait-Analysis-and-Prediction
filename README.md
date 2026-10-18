@@ -240,13 +240,15 @@ Training writes to these folders (created automatically):
 
 | Folder | Contents |
 |---|---|
-| `Neural_Networks_Output/Saved_Models/` | Keras models (`.keras`) |
-| `Neural_Networks_Output/Scaler/` | fitted scalers (`.save`, loaded with `joblib`) |
+| `Neural_Networks_Output/Saved_Models/Sagittal_only/` | Keras models (`.keras`) of the sagittal (6-channel) scripts |
+| `Neural_Networks_Output/Saved_Models/All_Channels/` | Keras models (`.keras`) of the all-planes (18-channel) scripts |
+| `Neural_Networks_Output/Scaler/Sagittal_only/` | fitted scalers (`.save`, loaded with `joblib`) of the sagittal scripts |
+| `Neural_Networks_Output/Scaler/All_Channels/` | fitted scalers (`.save`, loaded with `joblib`) of the all-planes scripts |
 | `Neural_Networks_Output/Predictions/` | predicted and ground-truth trajectories (`.xlsx`) |
 | `Neural_Networks_Output/Plots/` | training curves and prediction plots |
 
 Model and scaler files of the all-planes models, as loaded by
-`models_complete_comparison.py`:
+`models_complete_comparison.py` (models in `Saved_Models/All_Channels/`, scalers in `Scaler/All_Channels/`):
 
 | Model | Model file | Scaler file(s) |
 |---|---|---|

@@ -32,20 +32,20 @@ os.makedirs(PRED_DIR, exist_ok=True)
 # -----------------------------
 # LSTM artifacts
 # -----------------------------
-TIMESTAMP_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Timestamp_lstm_model.keras"
-TIMESTAMP_LSTM_SCALER_PATH = "Neural_Networks_Output/Scaler/standard_scaler_typical_lstm.save"
+TIMESTAMP_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Sagittal_only/Timestamp_lstm_model.keras"
+TIMESTAMP_LSTM_SCALER_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/standard_scaler_typical_lstm.save"
 
-TIMESTAMP_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Timestamp_cnn_model.keras"
-TIMESTAMP_CNN_SCALER_PATH = "Neural_Networks_Output/Scaler/standard_scaler_typical_cnn.save"
+TIMESTAMP_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Sagittal_only/Timestamp_cnn_model.keras"
+TIMESTAMP_CNN_SCALER_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/standard_scaler_typical_cnn.save"
 
-PV_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/PV_rolling_next_tick_lstm.keras"
-PV_LSTM_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/scaler_pv.save"
-PV_LSTM_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/scaler_angles.save"
+PV_LSTM_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Sagittal_only/PV_rolling_next_tick_lstm_final.keras"
+PV_LSTM_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/scaler_pv.save"
+PV_LSTM_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/scaler_angles.save"
 
 
-PV_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/PV_rolling_next_tick_cnn.keras"
-PV_CNN_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/scaler_pv_cnn.save"
-PV_CNN_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/scaler_angles_cnn.save"
+PV_CNN_MODEL_PATH = "Neural_Networks_Output/Saved_Models/Sagittal_only/PV_rolling_next_tick_cnn_final.keras"
+PV_CNN_SCALER_PV_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/scaler_pv_cnn.save"
+PV_CNN_SCALER_ANGLES_PATH = "Neural_Networks_Output/Scaler/Sagittal_only/scaler_angles_cnn.save"
 
 # -----------------------------
 # columns

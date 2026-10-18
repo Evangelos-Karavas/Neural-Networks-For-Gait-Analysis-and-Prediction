@@ -44,8 +44,8 @@ CP_SKIPROWS = [1, 2]
 MAX_CP_FILES = 500
 TRAIN_FRAC, VAL_FRAC, SPLIT_SEED = 0.70, 0.15, 42
 
-SAVE_DIR = "Neural_Networks_Output/Saved_Models"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models/All_Channels"
+SCALER_DIR = "Neural_Networks_Output/Scaler/All_Channels"
 PLOT_DIR = "Neural_Networks_Output/Plots"
 
 ANGLE_COLS = [

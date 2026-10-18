@@ -29,9 +29,9 @@ CP_FOLDER = "Data_CP/"
 CP_SHEET = "Data"
 CP_SKIPROWS = [1, 2]
 
-SAVE_DIR = "Neural_Networks_Output/Saved_Models"
+SAVE_DIR = "Neural_Networks_Output/Saved_Models/Sagittal_only"
 PRED_DIR = "Neural_Networks_Output/Predictions"
-SCALER_DIR = "Neural_Networks_Output/Scaler"
+SCALER_DIR = "Neural_Networks_Output/Scaler/Sagittal_only"
 PLOT_DIR = "Neural_Networks_Output/Plots"
 
 ANGLE_COLS = [
